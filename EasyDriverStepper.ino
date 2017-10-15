@@ -50,6 +50,8 @@ void setup() {
   while (!Serial) {
     ; // wait for serial port to connect. Needed for Leonardo only
   }
+  calibrate(); // Calibrate the zero position
+/*
   // Calibrate the zero position
   int endStatus = digitalRead(endStopPin); //High when interrupted
   uint16_t targetPosn = 0;
@@ -73,6 +75,7 @@ void setup() {
   Serial.print (currentPosn);
   Serial.print (":  targetPosn = ");
   Serial.println(targetPosn);
+*/
 }
 
 void loop() {
@@ -204,6 +207,33 @@ uint8_t is_button_released(uint8_t *button_history) {
   }
 */
 /**********************************************************************************************************/
+void calibrate()
+{
+  // Calibrate the zero position
+  int endStatus = digitalRead(endStopPin); //High when interrupted
+  uint16_t targetPosn = 0;
+  Serial.print ("currentPosn start = ");
+  Serial.println (currentPosn); 
+  while (!endStatus) {
+    rotate(-1, .1);
+    targetPosn++;
+    endStatus = digitalRead(endStopPin);
+    //    delay(1); // Add delay here to slow down switch rotation speed
+  }
+  currentPosn = 0;
+  Serial.print ("currentPosnA = ");
+  Serial.print (currentPosn);
+  Serial.print (":  targetPosnA = ");
+  Serial.println(targetPosn);
+  if (targetPosn != 0) { // Settings are OK if already at zero position
+    rotate(targetPosn, .1);
+  }
+  Serial.print ("currentPosn = ");
+  Serial.print (currentPosn);
+  Serial.print (":  targetPosn = ");
+  Serial.println(targetPosn);
+}
+
 
 void rotate(int steps, float speed) {
   //rotate a specific number of microsteps (8 microsteps per step) - (negitive for reverse movement)

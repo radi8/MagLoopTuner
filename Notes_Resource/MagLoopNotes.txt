@@ -1,0 +1,36 @@
+That is the identical stepper to what I am using at present. I am driving it with this board
+http://www.ebay.com/itm/NEW-EasyDriver-Shield-stepping-Stepper-Motor-Driver-V44-A3967-For-Arduino-M31-/301724408775?epid=2022200837&hash=item46402d1bc7:g:G1kAAOSwDN1UNcqN
+ and the reason for going this way is that I can have the board at the antenna and the arduino in the shack with only 2 signal wires plus ground interconnecting them. Some things to be determined are.
+
+How long can the cable run be before signals are too attenuated (They are TTL)
+Will RF get into things
+Can I run power to the antenna via a Bias Tee
+Is the stepper motor a good match for the system
+Will the stepper system make too much RF noise on Rx
+Is gear train backlash going to be an issue
+
+
+I am thinking of using ethernet cat 5 cable for the signal wires and maybe even the power. I also need a zero calibration device like an LED interrupter or microswitch so I don't go trying to drive the capacitor beyond min or max capacity.
+
+As you can see it is early days for the controller and a fair bit of experimenting to go but everything done so far has come out to my expectation.
+
+Getting back to the stepper motor you refer to, it is a 4 phase unipolar motor. No harder to drive than anything else and has an arduino native library for it so it is only about 10 lines of code to get going and turn back and forth. It will need the 4 signal wires from the arduino wired to the antenna end where the uln2003 driver board could be located or you can do the simple mod to change it to a bipolar motor and use the easydriver board. The advantage of this is 2 signal lines and more torque from the motor but I doubt that is a real advantage as the 64:1 gear drive gives so much torque that it can't be stopped with the fingers anyway.
+
+Just give me another couple of days to answer all the questions and I will be in a better position to advise on the best thing to get. Standard steppers like in 5 1/4" fdd's are usually 1.8 deg per step and unipolar types. I think that they would need at least a 10:1 gear reduction to get sharp enough tuning but they would be up to the job with gearing.
+
+
+The mag loop is to be a portable antenna to take in the field where I won't have wifi so I thought I would go with a cable. This morning I got the software going properly and have made up a control cable from a 10 M length of cat 5 cable. Shortly I will wire it in to test if the long cable messes anything up but I don't expect it will. I still have to set up the end stop interrupter and make a mounting for the stepper motor so will be busy for the rest of the day on it.
+
+Yes I am manually tuning the loop using a rotary encoder which takes 1024 steps to traverse 180 degrees so I think they are fine enough to tune spot on. There is a push button on the rotary encoder which I press to get a times 5 speed up on the tuning knob for a fast QSY. I don't lose the capacitor position on power down as it simply sits there where it was last tuned to. The power up algorithm rotates the capacitor to maximum C (fully anticlockwise) and an interrupter detects this spot and stops the motor. While the motor was stepping it counted the steps in a counter register and at zero it zero's the position counter then steps the number of steps in the counter updating the position register as it goes. When it finally reaches the original power up position the position register holds the correct value for where it is. It won't step over 1024 or under zero so I don't load a 180 degree capacitor beyond the stops.
+
+I will be building two loops in the final versions with one for 80/40 and the other for 30/20/17/15/10. I calculated an 80 metre loop and they are pretty big so probably I will optimize it for 40M and suffer the 6 to 10 dB loss on 80 which will still do all the QSO's and nets I require - probably still get the odd VK contact with it as well. I still think that the loop from Jim Tregallis is a really excellent design and would go that way when I get some of the gas pipe. There is a possibility that we will get to Australia in the next 6 months and if so I will bring a roll back in my suitcase.
+
+I have attached a couple of pictures of the completed loop. On the mechanism detail picture (MagLoop_2.jpg) you can see the stepper motor coupled to the shaft to the tuning capacitor with the interrupter mechanism locked to the shaft just before the first bearing. You can see the tab on the LHS which when rotated to the correct spot, blocks off the light on the interrupter which is obscured underneath the shaft. MagLoop_1.jpg shows a general view of the whole antenna with the coax and cat5 cable used for power and signals running up to the attic where my shack is.
+
+The coupling loop is as I mentioned stripped out of some 230 volt 2.5mm cable and is 1/5 th the loop diameter. I have not tried more than 10 watts on the antenna but will find out at what power the capacitor breaks down.
+
+There are a lot of tests to do on the antenna yet but I did do some Whisper tests and compared them with my dipole antenna and think it is slightly worse than the dipole by around 2 to 3 dB on 20 metres which is probably the optimum band for the loop. Considering the size trade off it is looking to be a winner and I am keen to try the other bands it it will tune up on.
+
+There were a few gremlins like the backlash in the gears was more than I expected, tuning clockwise lowered the frequency and I want it to calibrate at maximum capacity rather than minimum. All in all nothing insurmountable although with a permanent version I would want a better stepper and gearbox and I need an indicator for maximum and minimum capacity.
+
+In the shack end a rotary interrupter controls the step up and step down pulses via an Arduino and the whole lot is powered from a 9 volt plug pack. The VSWR is good when tuned at around 1.12:1 and there is no RF noise from the system that I have heard so far. When I make it autotune I will need to do a tuning algorithm which runs through the tuning point recording the step which gives best tune, back up a bit and then step forward to best tune count to negate the backlash.
