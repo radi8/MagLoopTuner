@@ -9,6 +9,8 @@
 //Written to control 32 step stepper (32*8 = 256 microsteps)
 // Stepper used = 28BYJ-48 5 volt
 // Gear ratio   = 1/64
+//The capacitor rotates anticlockwise to traverse from maximum to
+//minimum capacitance. We rotate clockwise to increase frequency.
 /////////////////////////////////////////////////////////////////
 
 #define DIR_PIN 2
@@ -17,6 +19,8 @@ const uint8_t pinA = 4;    // Connected to CLK on KY-040
 const uint8_t pinB = 5;    // Connected to DT on KY-040
 const uint8_t pinBtn = 6;  // Connected to Push Button on KY-040
 const uint8_t endStopPin = 8;
+const uint8_t maxCendstop = 10;
+const uint8_t minCendstop = 12;
 
 const int stepsPerMotorRev = 32;    // Change this to fit the number of steps per revolution
 // for your motor.
@@ -27,7 +31,8 @@ const int microStepsPerStep = 1;     // Change according to EasyDriver settings
 int encoderPosCount = 0;
 
 int maxPosn = stepsPerShaftRev/2 * microStepsPerStep * 0.998;// Don't drive it right to the end
-int currentPosn = (maxPosn - 1);
+//int currentPosn = (maxPosn - 1);
+int currentPosn = 1;
 boolean bCW;
 //boolean pinA_Last;
 
@@ -37,13 +42,18 @@ void setup() {
   // initialize the digital output pins.
   pinMode(DIR_PIN, OUTPUT);
   pinMode(STEP_PIN, OUTPUT);
+  pinMode(maxCendstop, OUTPUT);
+  pinMode(minCendstop, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(maxCendstop, LOW);
+  digitalWrite(minCendstop, LOW);
+  digitalWrite(LED_BUILTIN, LOW); // Turn off the LED
   // initialize the digital input pins.
   pinMode(pinA, INPUT); digitalWrite(pinA, HIGH); // Pullups are part of the encoder component
   pinMode(pinB, INPUT); digitalWrite(pinB, HIGH);
   pinMode(pinBtn, INPUT); digitalWrite(pinBtn, HIGH); // Enable pullup for this one
   pinMode(endStopPin, INPUT); digitalWrite(endStopPin, HIGH);
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW); // Turn off the LED
+  
   //  pinA_Last = digitalRead(pinA);
   //Initialize serial and wait for port to open:
   Serial.begin(112500);
@@ -97,9 +107,9 @@ void loop() {
       encoderPosCount ++;
       bCW = true;
       if(ledState){
-        rotate(5, .1);
+        rotate(-5, .1);
       } else {
-        rotate(1, .1);
+        rotate(-1, .1);
       }
     } else {
 //      Serial.print(digitalRead(pinA)); Serial.print(" <A else B> "); Serial.println(b);
@@ -107,9 +117,9 @@ void loop() {
       encoderPosCount --;
       bCW = false;
       if(ledState){
-        rotate(-5, .1);
+        rotate(5, .1);
       } else {
-        rotate(-1, .1);
+        rotate(1, .1);
       }
     }
     //    pinA_Last = !pinA_Last;
@@ -130,9 +140,9 @@ void loop() {
       encoderPosCount ++;
       bCW = true;
       if(ledState){
-        rotate(5, .1);
+        rotate(-5, .1);
       } else {
-        rotate(1, .1);
+        rotate(-1, .1);
       }
     } else {
 //      Serial.print(digitalRead(pinA)); Serial.print(" <A release else B> "); Serial.println(b);
@@ -140,9 +150,9 @@ void loop() {
       encoderPosCount --;
       bCW = false;
       if(ledState){
-        rotate(-5, .1);
+        rotate(5, .1);
       } else {
-        rotate(-1, .1);
+        rotate(1, .1);
       }
     }
     Serial.print ("Encoder position count = ");
@@ -208,30 +218,36 @@ uint8_t is_button_released(uint8_t *button_history) {
 */
 /**********************************************************************************************************/
 void calibrate()
+// We are rotating clockwise to increase the capacity until it reaches the end stop. We count each step
+// taken to do this. When the end stop is reached the current position is set to zero and we command the
+// stepper to step anticlockwise the number of steps counted to restore the original position.
 {
   // Calibrate the zero position
   int endStatus = digitalRead(endStopPin); //High when interrupted
-  uint16_t targetPosn = 0;
+  uint16_t counter = 0;
   Serial.print ("currentPosn start = ");
   Serial.println (currentPosn); 
   while (!endStatus) {
-    rotate(-1, .1);
-    targetPosn++;
+    rotate(1, .1); // Step clockwise
+    counter++;
     endStatus = digitalRead(endStopPin);
     //    delay(1); // Add delay here to slow down switch rotation speed
   }
   currentPosn = 0;
   Serial.print ("currentPosnA = ");
   Serial.print (currentPosn);
-  Serial.print (":  targetPosnA = ");
-  Serial.println(targetPosn);
-  if (targetPosn != 0) { // Settings are OK if already at zero position
-    rotate(targetPosn, .1);
+  Serial.print (":  counterA = ");
+  Serial.println(counter);
+  
+  // If we were at zero position when calibrate called no steps would have been taken so we don't
+  // need to do anything else otherwise we restore the original position of the capacitor.
+  if (counter != 0) {
+    rotate(-counter, .1);
   }
   Serial.print ("currentPosn = ");
   Serial.print (currentPosn);
-  Serial.print (":  targetPosn = ");
-  Serial.println(targetPosn);
+  Serial.print (":  counter = ");
+  Serial.println(counter);
 }
 
 
@@ -249,8 +265,18 @@ void rotate(int steps, float speed) {
   for (int i = 0; i < steps; i++) {
     boolean y = digitalRead(endStopPin);
     
-    if(y && !dir) break; // Only let it step clockwise if at end stop
-    if((currentPosn >= maxPosn) && dir)break; // Only let it step anticlockwise if at maximum
+    if(y && dir){
+      digitalWrite(maxCendstop, HIGH);
+      break; // Only let it step clockwise if at end stop
+    } else {
+      digitalWrite(maxCendstop, LOW);
+    }
+    if((currentPosn >= maxPosn) && !dir){
+      digitalWrite(minCendstop, HIGH);
+      break; // Only let it step anticlockwise if at maximum
+    } else {
+      digitalWrite(minCendstop, LOW);
+    }
     
     digitalWrite(STEP_PIN, HIGH);
     delayMicroseconds(usDelay);
@@ -258,9 +284,9 @@ void rotate(int steps, float speed) {
     digitalWrite(STEP_PIN, LOW);
     delayMicroseconds(usDelay);
     if(dir){
-      currentPosn++;
-    } else {
       currentPosn--;
+    } else {
+      currentPosn++;
     }
   }
 //  digitalWrite(LED_BUILTIN, LOW);   // turn the LED off now rotation finished
