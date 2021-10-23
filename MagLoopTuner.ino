@@ -15,21 +15,37 @@
 
 #define DIR_PIN 2
 #define STEP_PIN 3
+
+#define NEMA17
+//#define A28BYJ48
 const uint8_t pinA = 4;    // Connected to CLK on KY-040
 const uint8_t pinB = 5;    // Connected to DT on KY-040
 const uint8_t pinBtn = 6;  // Connected to Push Button on KY-040
+const uint8_t calBtn = 7;  // Connected to the calibrate button
 const uint8_t endStopPin = 8;
 const uint8_t maxCendstop = 10;
 const uint8_t minCendstop = 12;
 
-const int stepsPerMotorRev = 32;    // Change this to fit the number of steps per revolution
-// for your motor.
+#ifdef A28BYJ48
+// Change this to fit the number of steps per revolution for your motor.
+const int stepsPerMotorRev = 32;    
+// 
 const int gearboxRatio     = 64;     // Assuming gear down ratio
 const int stepsPerShaftRev = (stepsPerMotorRev * gearboxRatio);  // 2048 for 28BYJ-48 motor.
 const int microStepsPerStep = 1;     // Change according to EasyDriver settings
+#endif
+
+#ifdef NEMA17
+// Change this to fit the number of steps per revolution for your motor.
+const int stepsPerMotorRev = 200;    
+// 
+const int gearboxRatio     = 28.4089;     // Assuming gear down ratio
+const int stepsPerShaftRev = (stepsPerMotorRev * gearboxRatio);  // 5681.78 for Nema_17 motor.
+const int microStepsPerStep = 1;     // Change according to EasyDriver settings
+#endif
 
 int encoderPosCount = 0;
-
+int mode = 0;
 int maxPosn = stepsPerShaftRev/2 * microStepsPerStep * 0.998;// Don't drive it right to the end
 //int currentPosn = (maxPosn - 1);
 int currentPosn = 1;
@@ -52,6 +68,7 @@ void setup() {
   pinMode(pinA, INPUT); digitalWrite(pinA, HIGH); // Pullups are part of the encoder component
   pinMode(pinB, INPUT); digitalWrite(pinB, HIGH);
   pinMode(pinBtn, INPUT); digitalWrite(pinBtn, HIGH); // Enable pullup for this one
+  pinMode(calBtn, INPUT); digitalWrite(calBtn, HIGH); // Enable pullup for this one
   pinMode(endStopPin, INPUT); digitalWrite(endStopPin, HIGH);
   
   //  pinA_Last = digitalRead(pinA);
@@ -60,36 +77,12 @@ void setup() {
   while (!Serial) {
     ; // wait for serial port to connect. Needed for Leonardo only
   }
-  calibrate(); // Calibrate the zero position
-/*
-  // Calibrate the zero position
-  int endStatus = digitalRead(endStopPin); //High when interrupted
-  uint16_t targetPosn = 0;
-  Serial.print ("currentPosn start = ");
-  Serial.println (currentPosn); 
-  while (!endStatus) {
-    rotate(-1, .1);
-    targetPosn++;
-    endStatus = digitalRead(endStopPin);
-    //    delay(1); // Add delay here to slow down switch rotation speed
-  }
-  currentPosn = 0;
-  Serial.print ("currentPosnA = ");
-  Serial.print (currentPosn);
-  Serial.print (":  targetPosnA = ");
-  Serial.println(targetPosn);
-  if (targetPosn != 0) { // Settings are OK if already at zero position
-    rotate(targetPosn, .1);
-  }
-  Serial.print ("currentPosn = ");
-  Serial.print (currentPosn);
-  Serial.print (":  targetPosn = ");
-  Serial.println(targetPosn);
-*/
+  setPosition(); // set the zero position
 }
 
 void loop() {
   static uint8_t Push_button_history = 0;
+  static uint8_t Cal_button_history = 0;
   static uint8_t Rotary_Encoder_history = 0;
   static boolean ledState = false;
 
@@ -163,7 +156,7 @@ void loop() {
 
   update_button(&Push_button_history, pinBtn);
   if (is_button_pressed(&Push_button_history)) {
-    Serial.println ("Button press detected");
+    Serial.println ("Encoder button press detected");
     // Toggle LED
     if (ledState) {
       digitalWrite(LED_BUILTIN, LOW); // Turn off LED
@@ -173,11 +166,63 @@ void loop() {
       ledState = true;
     }
   }
+  update_button(&Cal_button_history, calBtn);
+  if (is_button_pressed(&Cal_button_history)) {
+    Serial.println ("Calibrate button press detected");
+    calibrate();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Subroutines start here
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void calibrate()
+  // Calibrate the zero position
+{
+  mode++;
+  int endStatus = digitalRead(endStopPin); //High when interrupted
+  uint16_t counter = 0;
+  Serial.print ("currentPosn start = ");
+  Serial.println (currentPosn); 
+  while (!endStatus) {
+    rotate(1, .1); // Step clockwise
+    counter++;
+    endStatus = digitalRead(endStopPin);
+    //    delay(1); // Add delay here to slow down switch rotation speed
+  }
+  currentPosn = 0;
+  Serial.print ("currentPosnA = ");
+  Serial.print (currentPosn);
+  Serial.print (":  counterA = ");
+  Serial.println(counter);
+}  
+
+/*  
+  int endStatus = digitalRead(endStopPin); //High when interrupted
+  uint16_t targetPosn = 0;
+  Serial.print ("currentPosn start = ");
+  Serial.println (currentPosn); 
+  while (!endStatus) {
+    rotate(-1, .1);
+    targetPosn++;
+    endStatus = digitalRead(endStopPin);
+    //    delay(1); // Add delay here to slow down switch rotation speed
+  }
+  currentPosn = 0;
+  Serial.print ("currentPosnA = ");
+  Serial.print (currentPosn);
+  Serial.print (":  targetPosnA = ");
+  Serial.println(targetPosn);
+  if (targetPosn != 0) { // Settings are OK if already at zero position
+    rotate(targetPosn, .1);
+  }
+  Serial.print ("currentPosn = ");
+  Serial.print (currentPosn);
+  Serial.print (":  targetPosn = ");
+  Serial.println(targetPosn);
+*/
+/**********************************************************************************************************/
 
 void update_button(uint8_t *button_history, int pinNum) {
   //  ProfileTimer t ("update_button");
@@ -217,12 +262,13 @@ uint8_t is_button_released(uint8_t *button_history) {
   }
 */
 /**********************************************************************************************************/
-void calibrate()
-// We are rotating clockwise to increase the capacity until it reaches the end stop. We count each step
-// taken to do this. When the end stop is reached the current position is set to zero and we command the
-// stepper to step anticlockwise the number of steps counted to restore the original position.
+void setPosition()
+// We are rotating clockwise (facing the capacitor shaft) to increase the capacity until it reaches the
+// end stop. We count each step taken to do this. When the end stop is reached the current position is set
+// to zero and we command the stepper to step anticlockwise the number of steps counted to restore the
+// original position.
 {
-  // Calibrate the zero position
+  // Set to the Interrupter position
   int endStatus = digitalRead(endStopPin); //High when interrupted
   uint16_t counter = 0;
   Serial.print ("currentPosn start = ");
@@ -239,7 +285,7 @@ void calibrate()
   Serial.print (":  counterA = ");
   Serial.println(counter);
   
-  // If we were at zero position when calibrate called no steps would have been taken so we don't
+  // If we were at Interrupter position when setPosition called no steps would have been taken so we don't
   // need to do anything else otherwise we restore the original position of the capacitor.
   if (counter != 0) {
     rotate(-counter, .1);
@@ -256,15 +302,16 @@ void rotate(int steps, float speed) {
   //speed is any number from .01 -> 1 with 1 being fastest - Slower is stronger
   int dir = (steps > 0) ? HIGH : LOW;
   steps = abs(steps);
-
-//  digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on while rotating
+  boolean y = false;
+  
   digitalWrite(DIR_PIN, dir);
 
   float usDelay = (1 / speed) * 140;
 
   for (int i = 0; i < steps; i++) {
-    boolean y = digitalRead(endStopPin);
-    
+    if(mode == 0) {
+      y = digitalRead(endStopPin);
+    }
     if(y && dir){
       digitalWrite(maxCendstop, HIGH);
       break; // Only let it step clockwise if at end stop
