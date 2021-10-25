@@ -20,13 +20,19 @@
 
 #define NEMA17
 //#define A28BYJ48
-const uint8_t pinA = 4;    // Connected to CLK on KY-040
-const uint8_t pinB = 5;    // Connected to DT on KY-040
-const uint8_t pinBtn = 6;  // Connected to Push Button on KY-040
-const uint8_t calBtn = 7;  // Connected to the calibrate button
+
+//const uint8_t pinA = 4;       // Connected to CLK on KY-040
+//const uint8_t pinB = 5;       // Connected to DT on KY-040
+//const uint8_t encoderBtn = 6; // Connected to Push Button on KY-040
+// const uint8_t calBtn = 7;      // Connected to the calibrate button
 const uint8_t endStopPin = 8;
 const uint8_t maxCendstop = 10;
 const uint8_t minCendstop = 12;
+
+#define BTN1_PIN 7 // Connected to the calibrate button
+#define BTN2_PIN 6 // Connected to Push Button on KY-040
+#define BTN3_PIN 4 // Connected to CLK on KY-040
+#define BTN4_PIN 5 // Connected to DT on KY-040
 
 #ifdef A28BYJ48
 // Change this to fit the number of steps per revolution for your motor.
@@ -46,15 +52,40 @@ const int stepsPerShaftRev = (stepsPerMotorRev * gearboxRatio);  // 5400 for Nem
 const int microStepsPerStep = 1;     // Change according to EasyDriver settings
 #endif
 
+
+#define pollTime 100
+#define MASK1 0b1100000000011111  // ( C01F )
+#define pressPattern   0b1100000000000000
+#define releasePattern 0b0000000000011111
+
+struct btns {
+  uint16_t btn1_history = 0xFFFF;
+#ifdef BTN2_PIN
+  uint16_t btn2_history = 0xFFFF;
+#endif
+#ifdef BTN3_PIN
+  uint16_t btn3_history = 0xFFFF;
+#endif
+#ifdef BTN4_PIN
+  uint16_t btn4_history = 0xFFFF;
+#endif
+#ifdef FEATURE_DEBUG_BTNS
+  int count = 0xFF;
+#endif
+} key_I; //Key state information
+
 int encoderPosCount = 0;
-int mode = 0;
+int mode = -1; // -1 = initialize; 0 = normal tuning; 1 to 4 = calibration modes.
 
 uint16_t interrupt2maxC = 0;
 uint16_t backlash = 0;
 uint16_t minimumC = stepsPerShaftRev / 2 * microStepsPerStep * 1; // Drive it right to the end
 uint16_t maximumC = 0; // Position 0 is plates fully meshed
 
-int currentPosn = 1;
+// As we are stepping anticlockwise if not already at the interrupter location or less, starting
+// with current posn = 2700 prevents us from ever reaching maximum capacitance and trying to go
+// less than currentPosn = 0. We treat being at interrupter or less separately
+int currentPosn = 2700;
 boolean bCW;
 unsigned int eepromTermAddr = 0;
 
@@ -71,10 +102,14 @@ void setup() {
   digitalWrite(minCendstop, LOW);
   digitalWrite(LED_BUILTIN, LOW); // Turn off the LED
   // initialize the digital input pins.
-  pinMode(pinA, INPUT); digitalWrite(pinA, HIGH); // Pullups are part of the encoder component
-  pinMode(pinB, INPUT); digitalWrite(pinB, HIGH);
-  pinMode(pinBtn, INPUT); digitalWrite(pinBtn, HIGH); // Enable pullup for this one
-  pinMode(calBtn, INPUT); digitalWrite(calBtn, HIGH); // Enable pullup for this one
+  //  pinMode(pinA, INPUT); digitalWrite(pinA, HIGH); // Pullups are part of the encoder component
+  //  pinMode(pinB, INPUT); digitalWrite(pinB, HIGH);
+  //  pinMode(encoderBtn, INPUT); digitalWrite(encoderBtn, HIGH); // Enable pullup for this one
+  //  pinMode(calBtn, INPUT); digitalWrite(calBtn, HIGH); // Enable pullup for this one
+  pinMode(BTN1_PIN, INPUT_PULLUP); // calBtn
+  pinMode(BTN2_PIN, INPUT_PULLUP); // Encoder pushbutton
+  pinMode(BTN3_PIN, INPUT_PULLUP); // CLK on KY-040 (pin4)
+  pinMode(BTN4_PIN, INPUT_PULLUP); // DT on KY-040 (pin 5)
   pinMode(endStopPin, INPUT); digitalWrite(endStopPin, HIGH);
 
   //  pinA_Last = digitalRead(pinA);
@@ -97,7 +132,7 @@ void setup() {
     eeAddress += sizeof(minimumC);
     EEPROM.get(eeAddress, maximumC);
     eeAddress += sizeof(maximumC);
-    Serial.println (F("  EEPROM VALUES"));
+    Serial.println (F("\n-------------------\n  EEPROM VALUES"));
     Serial.print (F("magicNum = "));
     Serial.println (magicNum);
     Serial.print (F("interrupt2maxC = "));
@@ -108,7 +143,9 @@ void setup() {
     Serial.println (minimumC);
     Serial.print (F("maximumC = "));
     Serial.println (maximumC);
-  } else { // No valid calibration data so flash the LED's
+    Serial.println (F("-------------------"));
+
+  } else { // No valid calibration data so flash the LED's to warn of non-calibration
     for (int x = 0; x < 10; x++) {
       digitalWrite(maxCendstop, HIGH);
       digitalWrite(minCendstop, HIGH);
@@ -126,21 +163,44 @@ void setup() {
 }
 
 void loop() {
-  static uint8_t Push_button_history = 0;
-  static uint8_t Cal_button_history = 0;
+  static uint16_t KY_040_pBtn_Hist = 0;
+  static uint16_t Cal_button_history = 0xFFFF;
+  static uint16_t KY_040_DT_Hist = 0xFFFF;
+  static uint16_t KY_040_CLK_Hist = 0xFFFF;
   static uint8_t Rotary_Encoder_history = 0;
   static boolean ledState = false;
 
-  boolean b = digitalRead(pinB);
-  update_button(&Rotary_Encoder_history, pinA);
+  boolean b = digitalRead(BTN4_PIN);
 
-  if (is_button_pressed(&Rotary_Encoder_history)) {
+  updateButton1();
+
+  // *** Process Rotary Encoder ***
+  /*
+    if (key_I.btn3_history == 0x0000) {
+      Serial.print("key_I.btn3_history = ");Serial.print(key_I.btn3_history);
+      Serial.print(" & KY_040_CLK_Hist = ");Serial.println(KY_040_CLK_Hist);
+      Serial.print("key_I.btn4_history = ");Serial.print(key_I.btn4_history);
+      Serial.print(" & KY_040_DT_Hist = ");Serial.println(KY_040_DT_Hist); Serial.println();
+      delay(1000);
+    }
+
+    if (key_I.btn3_history == 0xFFFF) {
+      Serial.print("key_I.btn3_history = ");Serial.print(key_I.btn3_history);
+      Serial.print(" & KY_040_CLK_Hist = ");Serial.println(KY_040_CLK_Hist);
+      Serial.print("key_I.btn4_history = ");Serial.print(key_I.btn4_history);
+      Serial.print(" & KY_040_DT_Hist = ");Serial.println(KY_040_DT_Hist); Serial.println();
+      delay(1000);
+    }
+  */
+  if ((key_I.btn3_history == 0x0000) && (key_I.btn3_history != KY_040_CLK_Hist)) { // HIGH to LOW transition
+    KY_040_CLK_Hist = key_I.btn3_history;
+    Serial.println("HIGH to LOW transition");
     // if the knob is rotating, we need to determine direction We do that by reading pin B state
     // and comparing to pinA's (both pins are equal when encoder is stationary).
     // We know pinA has gone from 1 -> 0 so see if pinB is also 0 yet
-    if ((digitalRead(pinB) == HIGH)) {
-      //   if (b == HIGH) {
-      //      Serial.print(digitalRead(pinA)); Serial.print(" <A .... B> "); Serial.println(b);
+//    if ((digitalRead(BTN4_PIN) == HIGH)) {
+
+    if(key_I.btn4_history == 0xFFFF) {
       // Means pin A Changed first - We're Rotating Clockwise
       encoderPosCount ++;
       bCW = true;
@@ -150,7 +210,6 @@ void loop() {
         rotate(-1, .1);
       }
     } else {
-      //      Serial.print(digitalRead(pinA)); Serial.print(" <A else B> "); Serial.println(b);
       // Otherwise B changed first and we're moving CCW
       encoderPosCount --;
       bCW = false;
@@ -160,21 +219,17 @@ void loop() {
         rotate(1, .1);
       }
     }
-
-    Serial.print ("Encoder position count = ");
+    Serial.print ("1 Encoder position count = ");
     Serial.print(encoderPosCount);
     Serial.print (" and Current position = ");
     Serial.println(currentPosn);
   }
-
-  if (is_button_released(&Rotary_Encoder_history)) {
-    // if the knob is rotating, we need to determine direction We do that by reading pin B state
-    // and comparing to pinA's (both pins are equal when encoder is stationary).
-    // We know pinA has gone from 1-> 0 so see if pinB is also 0
-    if ((digitalRead(pinB) == LOW)) {
-      //    if (b == LOW) {
-      //      Serial.print(digitalRead(pinA)); Serial.print(" <A release B> "); Serial.println(b);
-      // pinB is already low so we are moving clockwise
+  
+  if ((key_I.btn3_history == 0xFFFF) && (key_I.btn3_history != KY_040_CLK_Hist)) { // LOW to HIGH transition
+    KY_040_CLK_Hist = key_I.btn3_history;
+    Serial.println("LOW to HIGH transition");
+        if(key_I.btn4_history == 0x0000) {
+      // Means pin A Changed first - We're Rotating Clockwise
       encoderPosCount ++;
       bCW = true;
       if (ledState) {
@@ -183,8 +238,7 @@ void loop() {
         rotate(-1, .1);
       }
     } else {
-      //      Serial.print(digitalRead(pinA)); Serial.print(" <A release else B> "); Serial.println(b);
-      //  Going anticlockwise
+      // Otherwise B changed first and we're moving CCW
       encoderPosCount --;
       bCW = false;
       if (ledState) {
@@ -193,15 +247,29 @@ void loop() {
         rotate(1, .1);
       }
     }
-    Serial.print ("Encoder position count = ");
+    Serial.print ("1 Encoder position count = ");
     Serial.print(encoderPosCount);
     Serial.print (" and Current position = ");
     Serial.println(currentPosn);
   }
 
-  update_button(&Push_button_history, pinBtn);
-  if (is_button_pressed(&Push_button_history)) {
-    Serial.println ("Encoder button press detected");
+  // *** Process Calibrate button ***
+  if ((key_I.btn1_history == 0x0000) && (key_I.btn1_history != Cal_button_history)) { // Button has changed state
+    Cal_button_history = 0x0000;
+    Serial.println ("Calibrate button press detected");
+    calibrate();
+  }
+  if ((key_I.btn1_history == 0xFFFF) && (key_I.btn1_history != Cal_button_history)) { // Button has gone to released
+    Cal_button_history = 0xFFFF;
+  }
+
+  // *** Process Rotary Encoder Pushbutton ***
+  if ((key_I.btn2_history == 0x0000) && (key_I.btn2_history != KY_040_pBtn_Hist)) { // Button was pressed
+    KY_040_pBtn_Hist = 0x0000;
+    Serial.print ("key_I.btn1_history = ");
+    Serial.print(key_I.btn1_history);
+    Serial.print (" and KY_040_CLK_Hist = ");
+    Serial.println(KY_040_CLK_Hist);
     // Toggle LED
     if (ledState) {
       digitalWrite(LED_BUILTIN, LOW); // Turn off LED
@@ -211,10 +279,8 @@ void loop() {
       ledState = true;
     }
   }
-  update_button(&Cal_button_history, calBtn);
-  if (is_button_pressed(&Cal_button_history)) {
-    Serial.println ("Calibrate button press detected");
-    calibrate();
+  if ((key_I.btn2_history == 0xFFFF) && (key_I.btn2_history != KY_040_pBtn_Hist)) { // Button was released
+    KY_040_pBtn_Hist = 0xFFFF;
   }
 }
 
@@ -381,8 +447,10 @@ void update_button(uint8_t *button_history, int pinNum) {
   *button_history |= (digitalRead(pinNum) == 0);  // Normally pulled up so goes to 0 with button press
 }
 /**********************************************************************************************************/
+
+uint8_t is_button_pressed(uint8_t *button_history)
 // Returns true if debounced transition from HIGH to LOW
-uint8_t is_button_pressed(uint8_t *button_history) {
+{
   //  ProfileTimer t ("is_button_pressed");
   uint8_t pressed = 0;
   if ((*button_history & MASK) == 0b00000111) {
@@ -403,46 +471,79 @@ uint8_t is_button_released(uint8_t *button_history) {
   return released;
 }
 /**********************************************************************************************************/
-/*
-  uint8_t is_button_down(uint8_t *button_history) {
-  return (*button_history == 0b11111111);
-  }
-  uint8_t is_button_up(uint8_t *button_history) {
-  return (*button_history == 0b00000000);
-  }
-*/
-/**********************************************************************************************************/
+
 void setPosition()
-// We are rotating clockwise (facing the capacitor shaft) to increase the capacity until it reaches the
-// end stop. We count each step taken to do this. When the end stop is reached the current position is set
+// Called by setup
+
+// There are two possible states here on powerup. (1) the capacitor position is such that we are activating
+// the interrupter or (2) we are stepped beyond the interrupter. In both cases we need to be stepped beyond
+// the interrupter and step back to it where we mark the position using this as a reference from the
+// interrupt2maxC calibration data stored in EEprom.
+
+// (1) We will rotate 500 steps anticlockwise to step out of the interrupter, counting the steps. We then
+// rotate clockwise back to the interrupter and set the position reference then continue counting back the
+// rest of the 500 steps to restore the original position
+
+// (2) We are rotating clockwise (facing the capacitor shaft) to increase the capacity until it reaches the
+// interrupter. We count each step taken to do this. When the interrupter is reached the current position is set
 // to interrupt2maxC and we command the stepper to step anticlockwise the number of steps counted to restore
 // the original position.
 {
-  // Set to the Interrupter position
   int endStatus = digitalRead(endStopPin); //High when interrupted
   uint16_t counter = 0;
-  Serial.print ("currentPosn start = ");
-  Serial.println (currentPosn);
-  while (!endStatus) {
-    rotate(1, .1); // Step clockwise
-    counter++;
-    endStatus = digitalRead(endStopPin);
-    //    delay(1); // Add delay here to slow down switch rotation speed
-  }
-  currentPosn = interrupt2maxC;
-  Serial.print ("currentPosnA = ");
-  Serial.print (currentPosn);
-  Serial.print (":  counterA = ");
-  Serial.println(counter);
 
-  // If we were at Interrupter position when setPosition called no steps would have been taken so we don't
-  // need to do anything else otherwise we restore the original position of the capacitor.
-  if (counter != 0) {
-    rotate(-counter, .1);
+  Serial.print ("Counter initial value = ");
+  Serial.println (counter);
+
+  // Test to see if we have operated the interrupter
+
+  if (endStatus) { // At interrupter so step beyond and back. (High when interrupted)
+    mode = -1;
+    rotate(-1, .01); // Set the backlash to be at a constant position
+    delay(500);
+    rotate(1, .01);
+    delay(500);
+    rotate(-500, .1); // Step anticlockwise out of the interrupter
+    counter = 500; // set counter to match steps taken
+    Serial.print ("Counter maximum value = ");
+    Serial.println (counter);
+    endStatus = digitalRead(endStopPin);
+    while (!endStatus) {
+      rotate(1, .1); // Step clockwise
+      counter--;
+      //      Serial.print (F("Counter value = ")); Serial.println (counter);
+      endStatus = digitalRead(endStopPin);
+    }
+    currentPosn = interrupt2maxC; // Set our reference value at interrupter change to high
+    Serial.print (F("currentPosn = "));
+    Serial.print (currentPosn);
+    Serial.print (F("; -- Counter value at reference = "));
+    Serial.println (counter);
+    while (counter) {
+      rotate(1, .1); // Step clockwise to original position
+      counter--; // currentPosn is adjusted in the rotate routine
+    }
+  } else { // We were not at interrupter
+    mode = -2;
+    while (!endStatus) {
+      rotate(1, .1); // Step clockwise
+      counter++;
+      endStatus = digitalRead(endStopPin);
+    }
+    currentPosn = interrupt2maxC;
+    Serial.print (F("currentPosn = "));
+    Serial.print (currentPosn);
+    Serial.print (F("; -- Counter value at reference = "));
+    Serial.println (counter);
+    while (counter) {
+      rotate(-1, .1); // Step anticlockwise to original position
+      counter--; // currentPosn is adjusted in the rotate routine
+    }
   }
-  Serial.print ("currentPosn = ");
+  mode = 0; // Set to normal stepper operation
+  Serial.print (F("\ncurrentPosn = "));
   Serial.print (currentPosn);
-  Serial.print (":  counter = ");
+  Serial.print (F(":  counter = "));
   Serial.println(counter);
 }
 /**********************************************************************************************************/
@@ -451,25 +552,28 @@ void rotate(int steps, float speed) {
   // speed is any number from .01 -> 1 with 1 being fastest - Slower is stronger
   // This routine checks for a change of direction and applies the backlash correction.
 
-  static int oldDir = LOW;
-  int dir = (steps > 0) ? HIGH : LOW;
-  steps = abs(steps); // Convert to positive number if negative
-  if (mode == 0) {
-    if (dir != oldDir) {
-      steps += backlash;
-      oldDir = dir;
-    }
-  }
+  static int oldRotationDirection = HIGH;
+  int rotationDirection = (steps > 0) ? HIGH : LOW;
   boolean y = false;
   float usDelay = (1 / speed) * 140;
 
-  digitalWrite(DIR_PIN, dir); // Set the rotation direction on the Easy Stepper
+  if (mode == -1) oldRotationDirection = LOW;
+  steps = abs(steps); // Convert to positive number if negative
+  if (mode == 0) {
+    if (rotationDirection != oldRotationDirection) {
+      steps += backlash;
+      oldRotationDirection = rotationDirection;
+    }
+  }
+  digitalWrite(DIR_PIN, rotationDirection); // Set the rotation direction on the Easy Stepper
 
   for (int i = 0; i < steps; i++) {
-    if (mode == 0) {    // In calibration mode, prevent detecting the end stop condition
+    // If not in calibration mode, detect the position light interrupter status
+    if (mode == 0) {
       y = digitalRead(endStopPin);
     }
-    if (y && dir) {
+    //
+    if ((currentPosn <= maximumC) && rotationDirection) { // maximumC is at currentPosn = 0
       digitalWrite(maxCendstop, HIGH);
       if (!mode) { // Don't honour endstops if in "Calibrate mode"
         break; // Only let it step clockwise if at end stop
@@ -477,7 +581,7 @@ void rotate(int steps, float speed) {
     } else {
       digitalWrite(maxCendstop, LOW);
     }
-    if ((currentPosn >= minimumC) && !dir) {
+    if ((currentPosn >= minimumC) && !rotationDirection) { // minimumC is at currentPosn = 2700
       digitalWrite(minCendstop, HIGH);
       if (!mode) { // Don't honour endstops if in "Calibrate mode"
         break; // Only let it step anticlockwise if at maximum
@@ -491,7 +595,7 @@ void rotate(int steps, float speed) {
 
     digitalWrite(STEP_PIN, LOW);
     delayMicroseconds(usDelay);
-    if (dir) {
+    if (rotationDirection) {
       currentPosn--;
     } else {
       currentPosn++;
@@ -499,179 +603,79 @@ void rotate(int steps, float speed) {
   } // End of for loop
 }
 /**********************************************************************************************************/
-/*
-  void rotateDeg(float deg, float speed) {
-  //rotate a specific number of degrees (negative for reverse movement)
-  //speed is any number from .01 -> 1 with 1 being fastest - Slower is stronger
-  int dir = (deg > 0) ? HIGH : LOW;
+void updateButton1(void) {
 
-  digitalWrite(DIR_PIN, dir);
+  // Get the current button state.
 
-  int steps = abs(deg) * (1 / 0.9375); // 360/384=.9375
-  float usDelay = (1 / speed) * 140;
+  static uint32_t startTime = micros() - pollTime; //Force immediate execution 1st time around
 
-  for (int i = 0; i < steps; i++) {
-    digitalWrite(STEP_PIN, HIGH);
-    delayMicroseconds(usDelay);
-
-    digitalWrite(STEP_PIN, LOW);
-    delayMicroseconds(usDelay);
+  if ((startTime + pollTime) > micros()) {
+    return false; // We hadn't reached timeout so didn't process a button
   }
+
+  startTime = micros();
+
+#ifdef FEATURE_DEBUG_BTNS
+  if (key_I.count == 0) {
+    Serial.print(key_I.count); Serial.print("\t");
+    Serial.println(key_I.btn1_history, BIN);
+    key_I.count++;
   }
-*/
-/**********************************************************************************************************/
-void eeprom_Load(unsigned int freq)
-{
-  // Loads the passed frequency into the eeprom table of presets
-  // If freq = 0 then the table is cleared and reset to address 0 as start/end of table
-  // If frequency is higher than any other in the table it will be appended
-  // If frequency is lower than any table entry it will be pre-pended
-  // Otherwise the frequency will be inserted so as to keep the table in ascending frequency.
+#endif
 
-  int eeAddress = 0;
-  int eeAddrHi = 0;
-  boolean endFlag = false;
+  key_I.btn1_history = (key_I.btn1_history << 1) | digitalRead(BTN1_PIN);
 
-  if (freq == 0) {
-    eepromTermAddr = 0;
-    EEPROM.put(eepromTermAddr, 0);
-    Serial.println(F("Relay table has been zeroed"));
+#ifdef FEATURE_DEBUG_BTNS
+  if ((key_I.count <= 25) && (key_I.count != 0xFF)) {
+    Serial.print(key_I.count); Serial.print("\t");
+    Serial.println(key_I.btn1_history, BIN);
+    key_I.count++;
   } else {
-    /*
-        EEPROM.get(eeAddress, val.freq);
-        if (val.freq == 0) {
-          //    endFlag = true; // If 1st addr = 0 (terminator) then we have a non loaded eeprom
-          EEPROM.put(eeAddress, freq);
-          eepromTermAddr += sizeof(MyValues);
-          EEPROM.put(eepromTermAddr, 0);
-          Serial.print(F("eeAddress = ")); Serial.print(eeAddress);
-          Serial.print(F(", eepromTermAddr = ")); Serial.println(eeAddress);
-        }
-        while ((val.freq) || (endFlag)) {
-          // We only get here if val.freq is a non zero number or we want to append the frequency
-          if (val.freq == freq) {
-            // The frequency we are entering matches a frequency already in the presets
-            // so simply overwrite it.
-            val.L = _status.L_relays;
-            val.C = _status.C_relays;
-            val.Z = _status.outputZ;
-            EEPROM.put(eeAddress, val);
-            Serial.print(F("freq ")); Serial.print(val.freq); Serial.print(F(" written to presets at address "));
-            Serial.println(eeAddress);
-            break;
-          } else {
-            Serial.print(F("val.freq = ")); Serial.print(val.freq);
-            Serial.print(F(";  freq = ")); Serial.print(freq);
-            Serial.print(F(";  eeAddress = ")); Serial.println(eeAddress);
-            // -------------------------------------------------------
-            if ((val.freq > freq) || (endFlag)) { // Don't process for frequencies less than the entry frequency
-              // val.freq must be greater than freq or we have reached the end to get here.
-
-              // We are going to insert the tune values in the address before this one
-              // (which is held in eeAddrHi). All the values above will need to be
-              // shifted up one to allow the tune data to be inserted.
-              Serial.println();
-
-              eeAddrHi = eeAddress;
-              eeAddress = eepromTermAddr;;
-              eepromTermAddr += sizeof(MyValues);//Move address to one struct item beyond
-              EEPROM.put(eepromTermAddr, 0);
-              Serial.print(F("Entering while loop, eeAddrHi = ")); Serial.print(eeAddrHi);
-              Serial.print(F(";  eeAddress = ")); Serial.print(eeAddress);
-              Serial.print(F(";  eepromTermAddr = ")); Serial.println(eepromTermAddr);
-
-              while ((eeAddress >= eeAddrHi) || (eeAddress == 0)) {
-                EEPROM.get(eeAddress, val.freq);
-                Serial.print(F("Start address = ")); Serial.print(eeAddress); Serial.print(F("  val.freq = ")); Serial.print(val.freq);
-                eeAddress += sizeof(unsigned int);  // Step off freq to L
-                EEPROM.get(eeAddress, val.L);
-                eeAddress += sizeof(byte);          // Step off L to C
-                EEPROM.get(eeAddress, val.C);
-                eeAddress += sizeof(byte);          // Step off C to Z
-                EEPROM.get(eeAddress, val.Z);
-                eeAddress += sizeof(byte);
-                EEPROM.put(eeAddress, val);
-                Serial.print(F("  Finish address = ")); Serial.println(eeAddress);
-                eeAddress -= (sizeof(MyValues) * 2);
-              }
-
-              val.freq = freq;
-              val.L = _status.L_relays;
-              val.C = _status.C_relays;
-              val.Z = _status.outputZ;
-              eeAddress = eeAddrHi;
-              EEPROM.put(eeAddress, val);
-              Serial.print(F("insert freq ")); Serial.print(val.freq); Serial.print(F(" written to presets at address "));
-              Serial.println(eeAddress);
-              eeAddress = (eepromTermAddr - sizeof(MyValues));
-              break;
-
-            }
-            // -------------------------------------------------------
-
-            eeAddress += sizeof(MyValues);//Move address to the next struct item
-            //      Serial.print(F("eeAddress = ")); Serial.println(eeAddress);
-            EEPROM.get(eeAddress, val.freq); //Get next frequency or 0000 if at end
-            if (val.freq == 0) endFlag = true;
-            //      Serial.print(F("Exiting else, val.freq = ")); Serial.println(val.freq);
-          }
-        }
-        EEPROM.put(eepromTermAddr, 0);
-        Serial.print(F("eeprom_Load() exit freq ")); Serial.print(val.freq);
-        Serial.print(F(", eepromTermAddr = ")); Serial.println(eepromTermAddr);
-    */
-    eeprom_Print();
+    if (key_I.count != 0xFF) Serial.println("-----------------------------------------");
+    key_I.count = 0xFF;
   }
-}
-
-//--------------------------------------------------------------------------------------------------------/
-
-void eeprom_Print()
-{
-  int eeAddress = 0;
-
-  Serial.println(F("-------------------"));
-  Serial.println(F("Freq, L_relays, C_Relays, outputZ, Address"));
-  /*
-    EEPROM.get(eeAddress, 0);
-
-    while (val.freq) {
-      eeAddress += sizeof(unsigned int);  // Step off freq to L
-      EEPROM.get(eeAddress, val.L);
-      eeAddress += sizeof(byte);          // Step off L to C
-      EEPROM.get(eeAddress, val.C);
-      eeAddress += sizeof(byte);          // Step off C to Z
-      EEPROM.get(eeAddress, val.Z);
-      eeAddress += sizeof(byte);
-
-      Serial.print(val.freq);
-      Serial.print(F("\t")); Serial.print(val.L);
-      Serial.print(F("\t  ")); Serial.print(val.C);
-      Serial.print(F("\t   ")); Serial.print(val.Z);
-      Serial.print(F("\t    ")); Serial.println(eeAddress - sizeof(MyValues));
-
-      EEPROM.get(eeAddress, val.freq); //Get next frequency or 0000 if at end
-    }
-  */
-  Serial.print(0);
-  Serial.print(F("  eepromTermAddr = ")); Serial.println(eepromTermAddr);
-  Serial.println(F("-------------------")); Serial.println();
-}
-/**********************************************************************************************************/
-void eeprom_initialise()
-{
-  // this routine loads some preset values into eeprom for fast tuning. In the final version this will become
-  // redundant as the values will be loaded by frequency with the counter installation. A magic number is
-  // loaded into the last byte of the eeprom to indicate that it is already loaded with tune values and we
-  // don't duplicate the data at each switch on.
-
-  int eeAddress = 0;
-
-  if (EEPROM[EEPROM.length() - 1] != 120) {
-    EEPROM.put(eeAddress, 100);
-    EEPROM[EEPROM.length() - 1] = 120; //Put a marker to show that data has been loaded into the eeprom
-    Serial.println(F("EEPROM initialised"));
-  } else {
-    Serial.println(F("EEPROM was already initialised"));
+#endif
+  if ((key_I.btn1_history & MASK1) == releasePattern) {
+    key_I.btn1_history = 0x5555;
+#ifdef FEATURE_DEBUG_BTNS
+    key_I.count = 0;
+    Serial.println("Released");
+#endif
   }
+  if ((key_I.btn1_history & MASK1) == pressPattern) {
+    //    pressed = true;
+    key_I.btn1_history = 0xAAAA;
+#ifdef FEATURE_DEBUG_BTNS
+    key_I.count = 0;
+    Serial.println("Pressed");
+#endif
+  }
+
+#ifdef BTN2_PIN
+  key_I.btn2_history = (key_I.btn2_history << 1) | digitalRead(BTN2_PIN);
+  if ((key_I.btn2_history & MASK1) == releasePattern) {
+    key_I.btn2_history = 0x5555;
+  }
+  if ((key_I.btn2_history & MASK1) == pressPattern) {
+    key_I.btn2_history = 0xAAAA;
+  }
+#endif
+#ifdef BTN3_PIN
+  key_I.btn3_history = (key_I.btn3_history << 1) | digitalRead(BTN3_PIN);
+  if ((key_I.btn3_history & MASK1) == releasePattern) {
+    key_I.btn3_history = 0x5555;
+  }
+  if ((key_I.btn3_history & MASK1) == pressPattern) {
+    key_I.btn3_history = 0xAAAA;
+  }
+#endif
+#ifdef BTN4_PIN
+  key_I.btn4_history = (key_I.btn4_history << 1) | digitalRead(BTN4_PIN);
+  if ((key_I.btn4_history & MASK1) == releasePattern) {
+    key_I.btn4_history = 0x5555;
+  }
+  if ((key_I.btn4_history & MASK1) == pressPattern) {
+    key_I.btn4_history = 0xAAAA;
+  }
+#endif
 }
