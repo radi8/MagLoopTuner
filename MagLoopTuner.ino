@@ -1,40 +1,35 @@
 //////////////////////////////////////////////////////////////////
-//©2017 Graeme Jury ZL2APV
-//Released under the lgpl License - Please alter and share.
-//Using the Brian Schmaltz easy stepper with an arduino
-//rotate() steps a specific number of steps.
-//rotateDeg() steps a specific number of degrees
-//speed is controlled by a number from .01 -> 1 (1 = fastest)
-//Slower Speed == Stronger movement
-//Written to control 32 step stepper (32*8 = 256 microsteps)
-// Stepper used = 28BYJ-48 5 volt
-// Gear ratio   = 1/64
-//The capacitor rotates anticlockwise to traverse from maximum to
-//minimum capacitance. We rotate clockwise to increase frequency.
+// ©2017 Graeme Jury ZL2APV
+// Released under the lgpl License - Please alter and share.
+// Using the Brian Schmaltz easy stepper with an arduino
+// rotate() steps a specific number of steps.
+// speed is controlled by a number from .01 -> 1 (1 = fastest)
+// Slower Speed == Stronger movement
+// The capacitor rotates anticlockwise to traverse from maximum to
+// minimum capacitance. We rotate clockwise to increase frequency.
 /////////////////////////////////////////////////////////////////
 
 #include <EEPROM.h>
 
-#define DIR_PIN 2
-#define STEP_PIN 3
-
+// Choose the stepper motor type (Only one)
 #define NEMA17
 //#define A28BYJ48
 
-//const uint8_t pinA = 4;       // Connected to CLK on KY-040
-//const uint8_t pinB = 5;       // Connected to DT on KY-040
-//const uint8_t encoderBtn = 6; // Connected to Push Button on KY-040
-// const uint8_t calBtn = 7;      // Connected to the calibrate button
-const uint8_t endStopPin = 8;
-const uint8_t maxCendstop = 10;
-const uint8_t minCendstop = 12;
+// Arduino pin assignments
+const uint8_t DIR_PIN     = 2;  // Connected to the EasyDriver board
+const uint8_t STEP_PIN    = 3;  // Connected to the EasyDriver board
+// These assignments need to be #defines as they are referenced in the struct.
+#define BTN3_PIN 4              // Connected to CLK on KY-040
+#define BTN4_PIN 5              // Connected to DT on KY-040
+#define BTN2_PIN 6              // Connected to Push Button on KY-040
+#define BTN1_PIN 7              // Connected to the calibrate button
+const uint8_t endStopPin  = 8;  // Connected to the interrupter
+const uint8_t maxCendstop = 10; // Connected to LED indicator
+const uint8_t minCendstop = 12; // Connected to LED indicator
 
-#define BTN1_PIN 7 // Connected to the calibrate button
-#define BTN2_PIN 6 // Connected to Push Button on KY-040
-#define BTN3_PIN 4 // Connected to CLK on KY-040
-#define BTN4_PIN 5 // Connected to DT on KY-040
+// Set stepper motor properties
 
-#ifdef A28BYJ48
+#ifdef A28BYJ48 // 28BYJ-48 5 volt
 // Change this to fit the number of steps per revolution for your motor.
 const int stepsPerMotorRev = 32;
 //
@@ -52,12 +47,13 @@ const int stepsPerShaftRev = (stepsPerMotorRev * gearboxRatio);  // 5400 for Nem
 const int microStepsPerStep = 1;     // Change according to EasyDriver settings
 #endif
 
-
+// Program GLOBAL definitions
 #define pollTime 100
 #define MASK1 0b1100000000011111  // ( C01F )
 #define pressPattern   0b1100000000000000
 #define releasePattern 0b0000000000011111
 
+// Structure for holding the debounce history
 struct btns {
   uint16_t btn1_history = 0xFFFF;
 #ifdef BTN2_PIN
@@ -77,6 +73,7 @@ struct btns {
 int encoderPosCount = 0;
 int mode = -1; // -1 = initialize; 0 = normal tuning; 1 to 4 = calibration modes.
 
+// Stepper motor state variables loaded from EEprom at startup
 uint16_t interrupt2maxC = 0;
 uint16_t backlash = 0;
 uint16_t minimumC = stepsPerShaftRev / 2 * microStepsPerStep * 1; // Drive it right to the end
@@ -86,10 +83,8 @@ uint16_t maximumC = 0; // Position 0 is plates fully meshed
 // with current posn = 2700 prevents us from ever reaching maximum capacitance and trying to go
 // less than currentPosn = 0. We treat being at interrupter or less separately
 int currentPosn = 2700;
-boolean bCW;
-unsigned int eepromTermAddr = 0;
 
-const uint8_t MASK = 0b11000111;
+unsigned int eepromTermAddr = 0;
 
 void setup() {
   // initialize the digital output pins.
@@ -98,21 +93,17 @@ void setup() {
   pinMode(maxCendstop, OUTPUT);
   pinMode(minCendstop, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW); // Turn off the LED
   digitalWrite(maxCendstop, LOW);
   digitalWrite(minCendstop, LOW);
-  digitalWrite(LED_BUILTIN, LOW); // Turn off the LED
+
   // initialize the digital input pins.
-  //  pinMode(pinA, INPUT); digitalWrite(pinA, HIGH); // Pullups are part of the encoder component
-  //  pinMode(pinB, INPUT); digitalWrite(pinB, HIGH);
-  //  pinMode(encoderBtn, INPUT); digitalWrite(encoderBtn, HIGH); // Enable pullup for this one
-  //  pinMode(calBtn, INPUT); digitalWrite(calBtn, HIGH); // Enable pullup for this one
   pinMode(BTN1_PIN, INPUT_PULLUP); // calBtn
   pinMode(BTN2_PIN, INPUT_PULLUP); // Encoder pushbutton
   pinMode(BTN3_PIN, INPUT_PULLUP); // CLK on KY-040 (pin4)
   pinMode(BTN4_PIN, INPUT_PULLUP); // DT on KY-040 (pin 5)
-  pinMode(endStopPin, INPUT); digitalWrite(endStopPin, HIGH);
+  pinMode(endStopPin, INPUT_PULLUP);
 
-  //  pinA_Last = digitalRead(pinA);
   //Initialize serial and wait for port to open:
   Serial.begin(112500);
   while (!Serial) {
@@ -169,91 +160,54 @@ void loop() {
   static uint16_t KY_040_CLK_Hist = 0xFFFF;
   static uint8_t Rotary_Encoder_history = 0;
   static boolean ledState = false;
+  static boolean tmp = true;
+  boolean bCW;
+  
+  updateButton(); // Get the current state of all the buttons
 
-  boolean b = digitalRead(BTN4_PIN);
-
-  updateButton1();
-
+  // To avoid the default values for the KY_040 historys causing a false step from the
+  // rotary encoder, they need to be adjusted to match the detent (Hi or Lo) values. This
+  // is achieved by reading the CLK detent. Both CLK & DT have same output when stationary.
+  if (tmp) { // Do this first time through the loop only
+    if (digitalRead(BTN3_PIN) == 0) {
+      KY_040_CLK_Hist = 0;
+      KY_040_DT_Hist = 0;
+    }
+    tmp = false;
+  }
   // *** Process Rotary Encoder ***
-  /*
-    if (key_I.btn3_history == 0x0000) {
-      Serial.print("key_I.btn3_history = ");Serial.print(key_I.btn3_history);
-      Serial.print(" & KY_040_CLK_Hist = ");Serial.println(KY_040_CLK_Hist);
-      Serial.print("key_I.btn4_history = ");Serial.print(key_I.btn4_history);
-      Serial.print(" & KY_040_DT_Hist = ");Serial.println(KY_040_DT_Hist); Serial.println();
-      delay(1000);
-    }
 
-    if (key_I.btn3_history == 0xFFFF) {
-      Serial.print("key_I.btn3_history = ");Serial.print(key_I.btn3_history);
-      Serial.print(" & KY_040_CLK_Hist = ");Serial.println(KY_040_CLK_Hist);
-      Serial.print("key_I.btn4_history = ");Serial.print(key_I.btn4_history);
-      Serial.print(" & KY_040_DT_Hist = ");Serial.println(KY_040_DT_Hist); Serial.println();
-      delay(1000);
-    }
-  */
-  if ((key_I.btn3_history == 0x0000) && (key_I.btn3_history != KY_040_CLK_Hist)) { // HIGH to LOW transition
+  // Test for a rotary encoder CLK HIGH to LOW transition
+  if ((key_I.btn3_history == 0x0000) && (key_I.btn3_history != KY_040_CLK_Hist)) {
     KY_040_CLK_Hist = key_I.btn3_history;
     Serial.println("HIGH to LOW transition");
     // if the knob is rotating, we need to determine direction We do that by reading pin B state
     // and comparing to pinA's (both pins are equal when encoder is stationary).
     // We know pinA has gone from 1 -> 0 so see if pinB is also 0 yet
-//    if ((digitalRead(BTN4_PIN) == HIGH)) {
 
-    if(key_I.btn4_history == 0xFFFF) {
+    if (key_I.btn4_history == 0xFFFF) {
       // Means pin A Changed first - We're Rotating Clockwise
-      encoderPosCount ++;
       bCW = true;
-      if (ledState) {
-        rotate(-5, .1);
-      } else {
-        rotate(-1, .1);
-      }
     } else {
-      // Otherwise B changed first and we're moving CCW
-      encoderPosCount --;
       bCW = false;
-      if (ledState) {
-        rotate(5, .1);
-      } else {
-        rotate(1, .1);
-      }
     }
-    Serial.print ("1 Encoder position count = ");
-    Serial.print(encoderPosCount);
-    Serial.print (" and Current position = ");
-    Serial.println(currentPosn);
+    rotaryEncoderStep(bCW, ledState);
   }
-  
-  if ((key_I.btn3_history == 0xFFFF) && (key_I.btn3_history != KY_040_CLK_Hist)) { // LOW to HIGH transition
+  // Test for a rotary encoder CLK LOW to HIGH transition
+  if ((key_I.btn3_history == 0xFFFF) && (key_I.btn3_history != KY_040_CLK_Hist)) {
     KY_040_CLK_Hist = key_I.btn3_history;
     Serial.println("LOW to HIGH transition");
-        if(key_I.btn4_history == 0x0000) {
+    if (key_I.btn4_history == 0x0000) {
       // Means pin A Changed first - We're Rotating Clockwise
-      encoderPosCount ++;
       bCW = true;
-      if (ledState) {
-        rotate(-5, .1);
-      } else {
-        rotate(-1, .1);
-      }
     } else {
-      // Otherwise B changed first and we're moving CCW
-      encoderPosCount --;
       bCW = false;
-      if (ledState) {
-        rotate(5, .1);
-      } else {
-        rotate(1, .1);
-      }
     }
-    Serial.print ("1 Encoder position count = ");
-    Serial.print(encoderPosCount);
-    Serial.print (" and Current position = ");
-    Serial.println(currentPosn);
+    rotaryEncoderStep(bCW, ledState);
   }
 
   // *** Process Calibrate button ***
+
   if ((key_I.btn1_history == 0x0000) && (key_I.btn1_history != Cal_button_history)) { // Button has changed state
     Cal_button_history = 0x0000;
     Serial.println ("Calibrate button press detected");
@@ -264,6 +218,7 @@ void loop() {
   }
 
   // *** Process Rotary Encoder Pushbutton ***
+
   if ((key_I.btn2_history == 0x0000) && (key_I.btn2_history != KY_040_pBtn_Hist)) { // Button was pressed
     KY_040_pBtn_Hist = 0x0000;
     Serial.print ("key_I.btn1_history = ");
@@ -287,6 +242,31 @@ void loop() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Subroutines start here
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void rotaryEncoderStep(boolean bCW, boolean &ledState)
+{
+  if (bCW == true) {
+    encoderPosCount ++;
+    if (ledState) {
+      rotate(-5, .1);
+    } else {
+      rotate(-1, .1);
+    }
+  } else {
+    // Otherwise B changed first and we're moving CCW
+    encoderPosCount --;
+    if (ledState) {
+      rotate(5, .1);
+    } else {
+      rotate(1, .1);
+    }
+  }
+  Serial.print ("1 Encoder position count = ");
+  Serial.print(encoderPosCount);
+  Serial.print (" and Current position = ");
+  Serial.println(currentPosn);
+}
+/**********************************************************************************************************/
 
 void calibrate()
 // Calibrate the zero position
@@ -437,39 +417,6 @@ void stepFromEndstop()
     rotate(-500, .1); // Step clockwise
   }
 }
-
-/**********************************************************************************************************/
-
-void update_button(uint8_t *button_history, int pinNum) {
-  //  ProfileTimer t ("update_button");
-  //  delay(2);
-  *button_history = *button_history << 1;
-  *button_history |= (digitalRead(pinNum) == 0);  // Normally pulled up so goes to 0 with button press
-}
-/**********************************************************************************************************/
-
-uint8_t is_button_pressed(uint8_t *button_history)
-// Returns true if debounced transition from HIGH to LOW
-{
-  //  ProfileTimer t ("is_button_pressed");
-  uint8_t pressed = 0;
-  if ((*button_history & MASK) == 0b00000111) {
-    pressed = 1;
-    *button_history = 0b11111111;
-  }
-  return pressed;
-}
-/**********************************************************************************************************/
-
-uint8_t is_button_released(uint8_t *button_history) {
-  //  ProfileTimer t ("is_button_released");
-  uint8_t released = 0;
-  if ((*button_history & MASK) == 0b11000000) { // mask_bits removed from here
-    released = 1;
-    *button_history = 0b00000000;
-  }
-  return released;
-}
 /**********************************************************************************************************/
 
 void setPosition()
@@ -603,7 +550,7 @@ void rotate(int steps, float speed) {
   } // End of for loop
 }
 /**********************************************************************************************************/
-void updateButton1(void) {
+void updateButton(void) {
 
   // Get the current button state.
 
