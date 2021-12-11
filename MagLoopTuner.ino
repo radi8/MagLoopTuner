@@ -47,7 +47,7 @@ const int stepsPerShaftRev = (stepsPerMotorRev * gearboxRatio);  // 5400 for Nem
 const int microStepsPerStep = 1;     // Change according to EasyDriver settings
 #endif
 
-// Program GLOBAL definitions
+// Program GLOBAL debounce definitions
 #define pollTime 100
 #define MASK1 0b1100000000011111  // ( C01F )
 #define pressPattern   0b1100000000000000
@@ -55,20 +55,24 @@ const int microStepsPerStep = 1;     // Change according to EasyDriver settings
 
 // Structure for holding the debounce history
 struct btns {
-  uint16_t btn1_history = 0xFFFF;
+  uint16_t btn1_State = 0xFFFF;
+  uint16_t Cal_button_history = 0xFFFF;
 #ifdef BTN2_PIN
-  uint16_t btn2_history = 0xFFFF;
+  uint16_t btn2_State = 0xFFFF;
+  uint16_t KY_040_pBtn_Hist = 0;
 #endif
 #ifdef BTN3_PIN
-  uint16_t btn3_history = 0xFFFF;
+  uint16_t btn3_State = 0xFFFF;
+  uint16_t KY_040_CLK_Hist = 0xFFFF;
 #endif
 #ifdef BTN4_PIN
-  uint16_t btn4_history = 0xFFFF;
+  uint16_t btn4_State = 0xFFFF;
+  uint16_t KY_040_DT_Hist = 0xFFFF;
 #endif
 #ifdef FEATURE_DEBUG_BTNS
   int count = 0xFF;
 #endif
-} key_I; //Key state information
+} KI; //Key state information
 
 int encoderPosCount = 0;
 int mode = -1; // -1 = initialize; 0 = normal tuning; 1 to 4 = calibration modes.
@@ -153,16 +157,13 @@ void setup() {
   setPosition(); // set the zero position
 }
 
-void loop() {
-  static uint16_t KY_040_pBtn_Hist = 0;
-  static uint16_t Cal_button_history = 0xFFFF;
-  static uint16_t KY_040_DT_Hist = 0xFFFF;
-  static uint16_t KY_040_CLK_Hist = 0xFFFF;
+void loop()
+{
   static uint8_t Rotary_Encoder_history = 0;
   static boolean ledState = false;
   static boolean tmp = true;
   boolean bCW;
-  
+
   updateButton(); // Get the current state of all the buttons
 
   // To avoid the default values for the KY_040 historys causing a false step from the
@@ -170,22 +171,22 @@ void loop() {
   // is achieved by reading the CLK detent. Both CLK & DT have same output when stationary.
   if (tmp) { // Do this first time through the loop only
     if (digitalRead(BTN3_PIN) == 0) {
-      KY_040_CLK_Hist = 0;
-      KY_040_DT_Hist = 0;
+      KI.KY_040_CLK_Hist = 0;
+      KI.KY_040_DT_Hist = 0;
     }
     tmp = false;
   }
   // *** Process Rotary Encoder ***
 
   // Test for a rotary encoder CLK HIGH to LOW transition
-  if ((key_I.btn3_history == 0x0000) && (key_I.btn3_history != KY_040_CLK_Hist)) {
-    KY_040_CLK_Hist = key_I.btn3_history;
+  if ((KI.btn3_State == 0x0000) && (KI.btn3_State != KI.KY_040_CLK_Hist)) {
+    KI.KY_040_CLK_Hist = KI.btn3_State;
     Serial.println("HIGH to LOW transition");
     // if the knob is rotating, we need to determine direction We do that by reading pin B state
     // and comparing to pinA's (both pins are equal when encoder is stationary).
     // We know pinA has gone from 1 -> 0 so see if pinB is also 0 yet
 
-    if (key_I.btn4_history == 0xFFFF) {
+    if (KI.btn4_State == 0xFFFF) {
       // Means pin A Changed first - We're Rotating Clockwise
       bCW = true;
     } else {
@@ -194,10 +195,10 @@ void loop() {
     rotaryEncoderStep(bCW, ledState);
   }
   // Test for a rotary encoder CLK LOW to HIGH transition
-  if ((key_I.btn3_history == 0xFFFF) && (key_I.btn3_history != KY_040_CLK_Hist)) {
-    KY_040_CLK_Hist = key_I.btn3_history;
+  if ((KI.btn3_State == 0xFFFF) && (KI.btn3_State != KI.KY_040_CLK_Hist)) {
+    KI.KY_040_CLK_Hist = KI.btn3_State;
     Serial.println("LOW to HIGH transition");
-    if (key_I.btn4_history == 0x0000) {
+    if (KI.btn4_State == 0x0000) {
       // Means pin A Changed first - We're Rotating Clockwise
       bCW = true;
     } else {
@@ -208,23 +209,23 @@ void loop() {
 
   // *** Process Calibrate button ***
 
-  if ((key_I.btn1_history == 0x0000) && (key_I.btn1_history != Cal_button_history)) { // Button has changed state
-    Cal_button_history = 0x0000;
+  if ((KI.btn1_State == 0x0000) && (KI.btn1_State != KI.Cal_button_history)) { // Button has changed state
+    KI.Cal_button_history = 0x0000;
     Serial.println ("Calibrate button press detected");
     calibrate();
   }
-  if ((key_I.btn1_history == 0xFFFF) && (key_I.btn1_history != Cal_button_history)) { // Button has gone to released
-    Cal_button_history = 0xFFFF;
+  if ((KI.btn1_State == 0xFFFF) && (KI.btn1_State != KI.Cal_button_history)) { // Button has gone to released
+    KI.Cal_button_history = 0xFFFF;
   }
 
   // *** Process Rotary Encoder Pushbutton ***
 
-  if ((key_I.btn2_history == 0x0000) && (key_I.btn2_history != KY_040_pBtn_Hist)) { // Button was pressed
-    KY_040_pBtn_Hist = 0x0000;
-    Serial.print ("key_I.btn1_history = ");
-    Serial.print(key_I.btn1_history);
-    Serial.print (" and KY_040_CLK_Hist = ");
-    Serial.println(KY_040_CLK_Hist);
+  if ((KI.btn2_State == 0x0000) && (KI.btn2_State != KI.KY_040_pBtn_Hist)) { // Button was pressed
+    KI.KY_040_pBtn_Hist = 0x0000;
+    Serial.print ("KI.btn1_State = ");
+    Serial.print(KI.btn1_State);
+    Serial.print (" and KI.KY_040_CLK_Hist = ");
+    Serial.println(KI.KY_040_CLK_Hist);
     // Toggle LED
     if (ledState) {
       digitalWrite(LED_BUILTIN, LOW); // Turn off LED
@@ -234,8 +235,8 @@ void loop() {
       ledState = true;
     }
   }
-  if ((key_I.btn2_history == 0xFFFF) && (key_I.btn2_history != KY_040_pBtn_Hist)) { // Button was released
-    KY_040_pBtn_Hist = 0xFFFF;
+  if ((KI.btn2_State == 0xFFFF) && (KI.btn2_State != KI.KY_040_pBtn_Hist)) { // Button was released
+    KI.KY_040_pBtn_Hist = 0xFFFF;
   }
 }
 
@@ -563,66 +564,66 @@ void updateButton(void) {
   startTime = micros();
 
 #ifdef FEATURE_DEBUG_BTNS
-  if (key_I.count == 0) {
-    Serial.print(key_I.count); Serial.print("\t");
-    Serial.println(key_I.btn1_history, BIN);
-    key_I.count++;
+  if (KI.count == 0) {
+    Serial.print(KI.count); Serial.print("\t");
+    Serial.println(KI.btn1_State, BIN);
+    KI.count++;
   }
 #endif
 
-  key_I.btn1_history = (key_I.btn1_history << 1) | digitalRead(BTN1_PIN);
+  KI.btn1_State = (KI.btn1_State << 1) | digitalRead(BTN1_PIN);
 
 #ifdef FEATURE_DEBUG_BTNS
-  if ((key_I.count <= 25) && (key_I.count != 0xFF)) {
-    Serial.print(key_I.count); Serial.print("\t");
-    Serial.println(key_I.btn1_history, BIN);
-    key_I.count++;
+  if ((KI.count <= 25) && (KI.count != 0xFF)) {
+    Serial.print(KI.count); Serial.print("\t");
+    Serial.println(KI.btn1_State, BIN);
+    KI.count++;
   } else {
-    if (key_I.count != 0xFF) Serial.println("-----------------------------------------");
-    key_I.count = 0xFF;
+    if (KI.count != 0xFF) Serial.println("-----------------------------------------");
+    KI.count = 0xFF;
   }
 #endif
-  if ((key_I.btn1_history & MASK1) == releasePattern) {
-    key_I.btn1_history = 0x5555;
+  if ((KI.btn1_State & MASK1) == releasePattern) {
+    KI.btn1_State = 0x5555;
 #ifdef FEATURE_DEBUG_BTNS
-    key_I.count = 0;
+    KI.count = 0;
     Serial.println("Released");
 #endif
   }
-  if ((key_I.btn1_history & MASK1) == pressPattern) {
+  if ((KI.btn1_State & MASK1) == pressPattern) {
     //    pressed = true;
-    key_I.btn1_history = 0xAAAA;
+    KI.btn1_State = 0xAAAA;
 #ifdef FEATURE_DEBUG_BTNS
-    key_I.count = 0;
+    KI.count = 0;
     Serial.println("Pressed");
 #endif
   }
 
 #ifdef BTN2_PIN
-  key_I.btn2_history = (key_I.btn2_history << 1) | digitalRead(BTN2_PIN);
-  if ((key_I.btn2_history & MASK1) == releasePattern) {
-    key_I.btn2_history = 0x5555;
+  KI.btn2_State = (KI.btn2_State << 1) | digitalRead(BTN2_PIN);
+  if ((KI.btn2_State & MASK1) == releasePattern) {
+    KI.btn2_State = 0x5555;
   }
-  if ((key_I.btn2_history & MASK1) == pressPattern) {
-    key_I.btn2_history = 0xAAAA;
+  if ((KI.btn2_State & MASK1) == pressPattern) {
+    KI.btn2_State = 0xAAAA;
   }
 #endif
 #ifdef BTN3_PIN
-  key_I.btn3_history = (key_I.btn3_history << 1) | digitalRead(BTN3_PIN);
-  if ((key_I.btn3_history & MASK1) == releasePattern) {
-    key_I.btn3_history = 0x5555;
+  KI.btn3_State = (KI.btn3_State << 1) | digitalRead(BTN3_PIN);
+  if ((KI.btn3_State & MASK1) == releasePattern) {
+    KI.btn3_State = 0x5555;
   }
-  if ((key_I.btn3_history & MASK1) == pressPattern) {
-    key_I.btn3_history = 0xAAAA;
+  if ((KI.btn3_State & MASK1) == pressPattern) {
+    KI.btn3_State = 0xAAAA;
   }
 #endif
 #ifdef BTN4_PIN
-  key_I.btn4_history = (key_I.btn4_history << 1) | digitalRead(BTN4_PIN);
-  if ((key_I.btn4_history & MASK1) == releasePattern) {
-    key_I.btn4_history = 0x5555;
+  KI.btn4_State = (KI.btn4_State << 1) | digitalRead(BTN4_PIN);
+  if ((KI.btn4_State & MASK1) == releasePattern) {
+    KI.btn4_State = 0x5555;
   }
-  if ((key_I.btn4_history & MASK1) == pressPattern) {
-    key_I.btn4_history = 0xAAAA;
+  if ((KI.btn4_State & MASK1) == pressPattern) {
+    KI.btn4_State = 0xAAAA;
   }
 #endif
 }
