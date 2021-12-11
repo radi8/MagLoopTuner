@@ -1,0 +1,10 @@
+2021-12-12
+Structure created for debouncing buttons
+2021-10-26
+Fix false encoder step bug, cleaned code.
+2021-10-25
+Button debounce routine & position reset
+2021-10-24
+Calibration routine & EEprom storage added.
+2021-10-23
+Added Nema-17 settings
