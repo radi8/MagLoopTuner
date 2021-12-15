@@ -10,7 +10,9 @@
 /////////////////////////////////////////////////////////////////
 
 #include <EEPROM.h>
+#include <U8x8lib.h>
 
+U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 // Choose the stepper motor type (Only one)
 #define NEMA17
 //#define A28BYJ48
@@ -155,6 +157,17 @@ void setup() {
 
 
   setPosition(); // set the zero position
+  u8x8.begin();
+  u8x8.setPowerSave(0);
+  u8x8.setFont(u8x8_font_7x14_1x2_r); // 4 rows of 16 chars (We stay with this font for all printing)
+
+  u8x8.drawString(0,0,"Step Posn = ");
+  u8x8.drawString(0,2,"Line 0");
+  u8x8.setInverseFont(1);
+  u8x8.drawString(0,4,"1234567890123456");
+  u8x8.setInverseFont(0);
+  u8x8.drawString(0,6,"1234567890123456");
+  u8x8.drawString(12,0,"0000");
 }
 
 void loop()
