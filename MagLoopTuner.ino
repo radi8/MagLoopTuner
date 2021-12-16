@@ -11,8 +11,8 @@
 
 #include <EEPROM.h>
 #include <U8x8lib.h>
-
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
+
 // Choose the stepper motor type (Only one)
 #define NEMA17
 //#define A28BYJ48
@@ -78,6 +78,7 @@ struct btns {
 } KI; //Key state information
 
 int encoderPosCount = 0;
+char encoderPosString[5]; // The count needs to be a string for the display
 int mode = -1; // -1 = initialize; 0 = normal tuning; 1 to 4 = calibration modes.
 
 // Stepper motor state variables loaded from EEprom at startup
@@ -158,8 +159,6 @@ void setup() {
     }
   }
 
-
-  setPosition(); // set the zero position
   u8x8.begin();
   u8x8.setPowerSave(0);
   u8x8.setFont(u8x8_font_7x14_1x2_r); // 4 rows of 16 chars (We stay with this font for all printing)
@@ -170,7 +169,9 @@ void setup() {
   u8x8.drawString(0,4,"1234567890123456");
   u8x8.setInverseFont(0);
   u8x8.drawString(0,6,"1234567890123456");
-  u8x8.drawString(12,0,"0000");
+  u8x8.drawString(0,0,"Step Posn = ");
+
+ setPosition(); // set the zero position
 }
 
 void loop()
@@ -259,7 +260,33 @@ void loop()
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Subroutines start here
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+void printPosition(void)
+{
+  int cnt;
+  
+  itoa(currentPosn, encoderPosString, 10);
+  if(currentPosn < 10) {
+    // Shift right 3 places with blanks in 1st 3 places
+    encoderPosString[3] = encoderPosString[0];
+    encoderPosString[0] = " ";
+    encoderPosString[1] = " ";
+    encoderPosString[2] = " ";
+  } else if(currentPosn < 100) {
+    // Shift right 2 places with blanks in 1st 2 places
+    encoderPosString[3] = encoderPosString[1];
+    encoderPosString[2] = encoderPosString[0];
+    encoderPosString[0] = " ";
+    encoderPosString[1] = " ";
+  } else if(currentPosn < 1000) {
+    // Shift right 1 place with blank in 1st place
+    encoderPosString[3] = encoderPosString[2];
+    encoderPosString[2] = encoderPosString[1];
+    encoderPosString[1] = encoderPosString[0];
+    encoderPosString[0] = ' ';
+  }
+  
+  u8x8.drawString(12, 0, encoderPosString);
+}
 void rotaryEncoderStep(boolean bCW, boolean &ledState)
 {
   if (bCW == true) {
@@ -282,6 +309,8 @@ void rotaryEncoderStep(boolean bCW, boolean &ledState)
   Serial.print(encoderPosCount);
   Serial.print (" and Current position = ");
   Serial.println(currentPosn);
+
+  printPosition();
 }
 /**********************************************************************************************************/
 
@@ -507,8 +536,12 @@ void setPosition()
   mode = 0; // Set to normal stepper operation
   Serial.print (F("\ncurrentPosn = "));
   Serial.print (currentPosn);
+//  itoa(currentPosn, encoderPosString, 10);
   Serial.print (F(":  counter = "));
   Serial.println(counter);
+//  itoa(currentPosn, encoderPosString, 10);
+//  u8x8.drawString(12, 0, encoderPosString);
+  printPosition();
 }
 /**********************************************************************************************************/
 void rotate(int steps, float speed) {
