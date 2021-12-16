@@ -24,6 +24,7 @@ const uint8_t STEP_PIN    = 3;  // Connected to the EasyDriver board
 #define BTN2_PIN 6              // Connected to Push Button on KY-040
 #define BTN1_PIN 7              // Connected to the calibrate button
 const uint8_t endStopPin  = 8;  // Connected to the interrupter
+const uint8_t enablePin  = 9;  // Connected to the !ENABLE Pin on the EasyDriver board
 const uint8_t maxCendstop = 10; // Connected to LED indicator
 const uint8_t minCendstop = 12; // Connected to LED indicator
 
@@ -94,10 +95,12 @@ void setup() {
   // initialize the digital output pins.
   pinMode(DIR_PIN, OUTPUT);
   pinMode(STEP_PIN, OUTPUT);
+  pinMode(enablePin, OUTPUT);
   pinMode(maxCendstop, OUTPUT);
   pinMode(minCendstop, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW); // Turn off the LED
+  digitalWrite(enablePin, HIGH); // Disable EasyDriver stepper driver stage
   digitalWrite(maxCendstop, LOW);
   digitalWrite(minCendstop, LOW);
 
@@ -505,6 +508,9 @@ void rotate(int steps, float speed) {
   boolean y = false;
   float usDelay = (1 / speed) * 140;
 
+  digitalWrite(enablePin, LOW); // Enable EasyDriver stepper driver stage
+  delayMicroseconds(50); // Some settling time before stepping
+
   if (mode == -1) oldRotationDirection = LOW;
   steps = abs(steps); // Convert to positive number if negative
   if (mode == 0) {
@@ -549,6 +555,7 @@ void rotate(int steps, float speed) {
       currentPosn++;
     }
   } // End of for loop
+  digitalWrite(enablePin, HIGH); // Disable EasyDriver stepper driver stage
 }
 /**********************************************************************************************************/
 void updateButton(void) {
