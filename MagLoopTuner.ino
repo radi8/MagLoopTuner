@@ -163,22 +163,26 @@ void setup() {
   u8x8.setPowerSave(0);
   u8x8.setFont(u8x8_font_7x14_1x2_r); // 4 rows of 16 chars (We stay with this font for all printing)
 
-  u8x8.drawString(0,0,"Step Posn = ");
-  u8x8.drawString(0,2,"Line 0");
+  u8x8.drawString(0, 0, " *** STATUS *** ");
   u8x8.setInverseFont(1);
-  u8x8.drawString(0,4,"1234567890123456");
+  u8x8.drawString(0, 2, "Restoring Last C");
   u8x8.setInverseFont(0);
-  u8x8.drawString(0,6,"1234567890123456");
-  u8x8.drawString(0,0,"Step Posn = ");
+  u8x8.drawString(0, 4, "Tune Rate     X1");
+  //
+  u8x8.drawString(0, 6, "Current Band 20M");
+  //
+  //  u8x8.drawString(0,6,"1234567890123456");
 
- setPosition(); // set the zero position
+  setPosition(); // set the zero position
 }
 
 void loop()
 {
+  static uint32_t buttonTime = micros(); //Measure encoder pushbutton held time
   static uint8_t Rotary_Encoder_history = 0;
-  static boolean ledState = false;
+  static boolean ledState = true; // 1st time through loop LED will toggle to false
   static boolean tmp = true;
+  static boolean menuMode = false;
   boolean bCW;
 
   updateButton(); // Get the current state of all the buttons
@@ -239,53 +243,83 @@ void loop()
 
   if ((KI.btn2_State == 0x0000) && (KI.btn2_State != KI.KY_040_pBtn_Hist)) { // Button was pressed
     KI.KY_040_pBtn_Hist = 0x0000;
-    Serial.print ("KI.btn1_State = ");
+    buttonTime = micros();
+    Serial.print(F("KI.btn1_State = "));
     Serial.print(KI.btn1_State);
-    Serial.print (" and KI.KY_040_CLK_Hist = ");
+    Serial.print(F(" and KI.KY_040_CLK_Hist = "));
     Serial.println(KI.KY_040_CLK_Hist);
-    // Toggle LED
-    if (ledState) {
-      digitalWrite(LED_BUILTIN, LOW); // Turn off LED
-      ledState = false;
-    } else {
-      digitalWrite(LED_BUILTIN, HIGH);   // Turn on LED
-      ledState = true;
-    }
+
   }
   if ((KI.btn2_State == 0xFFFF) && (KI.btn2_State != KI.KY_040_pBtn_Hist)) { // Button was released
     KI.KY_040_pBtn_Hist = 0xFFFF;
+    Serial.print("buttonTime + = "); Serial.print(buttonTime + 1000000);
+    Serial.print(" & micros() = "); Serial.println(micros());
+    if (menuMode) {
+      loopMenu();
+    } else {
+      if ((buttonTime + 1000000) < micros()) { // check for a long press
+        // We are going into menu mode
+        Serial.println(F("We are going into menu mode"));
+        menuMode = true;
+      } else {
+        // We are staying in stepper mode
+        Serial.println(F("We are staying in stepper mode"));
+        if (ledState) {
+          digitalWrite(LED_BUILTIN, LOW); // Turn off LED
+          ledState = false;
+          u8x8.drawString(15, 4, "1");
+        } else {
+          digitalWrite(LED_BUILTIN, HIGH);   // Turn on LED
+          ledState = true;
+          u8x8.drawString(15, 4, "5");
+        }
+      }
+    }
+    buttonTime = 0;
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Subroutines start here
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void loopMenu()
+{
+  Serial.println(F("Processing menu pushButton"));
+  u8x8.clear();
+  u8x8.setInverseFont(1);
+  u8x8.drawString(0, 0, "Get Band");
+  u8x8.setInverseFont(0);
+  u8x8.drawString(0, 2, "Set Band");
+  u8x8.drawString(0, 4, "Calibrate");
+  u8x8.drawString(0, 6, "EXIT");
+}
+/**********************************************************************************************************/
 void printPosition(void)
 {
   int cnt;
-  
+
   itoa(currentPosn, encoderPosString, 10);
-  if(currentPosn < 10) {
+  if (currentPosn < 10) {
     // Shift right 3 places with blanks in 1st 3 places
     encoderPosString[3] = encoderPosString[0];
     encoderPosString[0] = " ";
     encoderPosString[1] = " ";
     encoderPosString[2] = " ";
-  } else if(currentPosn < 100) {
+  } else if (currentPosn < 100) {
     // Shift right 2 places with blanks in 1st 2 places
     encoderPosString[3] = encoderPosString[1];
     encoderPosString[2] = encoderPosString[0];
     encoderPosString[0] = " ";
     encoderPosString[1] = " ";
-  } else if(currentPosn < 1000) {
+  } else if (currentPosn < 1000) {
     // Shift right 1 place with blank in 1st place
     encoderPosString[3] = encoderPosString[2];
     encoderPosString[2] = encoderPosString[1];
     encoderPosString[1] = encoderPosString[0];
     encoderPosString[0] = ' ';
   }
-  
-  u8x8.drawString(12, 0, encoderPosString);
+
+  u8x8.drawString(12, 2, encoderPosString);
 }
 void rotaryEncoderStep(boolean bCW, boolean &ledState)
 {
@@ -305,9 +339,9 @@ void rotaryEncoderStep(boolean bCW, boolean &ledState)
       rotate(1, .1);
     }
   }
-  Serial.print ("1 Encoder position count = ");
+  Serial.print(F("1 Encoder position count = "));
   Serial.print(encoderPosCount);
-  Serial.print (" and Current position = ");
+  Serial.print(F(" and Current position = "));
   Serial.println(currentPosn);
 
   printPosition();
@@ -536,11 +570,12 @@ void setPosition()
   mode = 0; // Set to normal stepper operation
   Serial.print (F("\ncurrentPosn = "));
   Serial.print (currentPosn);
-//  itoa(currentPosn, encoderPosString, 10);
+  //  itoa(currentPosn, encoderPosString, 10);
   Serial.print (F(":  counter = "));
   Serial.println(counter);
-//  itoa(currentPosn, encoderPosString, 10);
-//  u8x8.drawString(12, 0, encoderPosString);
+  //  itoa(currentPosn, encoderPosString, 10);
+  //  u8x8.drawString(12, 0, encoderPosString);
+  u8x8.drawString(0, 2, "Step Posn = ");
   printPosition();
 }
 /**********************************************************************************************************/

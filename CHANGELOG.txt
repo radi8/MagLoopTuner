@@ -1,3 +1,7 @@
+2021-12-
+
+2021-12-17
+Added an oled display and code to display the current step position of the capacitor
 2021-12-12
 Structure created for debouncing buttons
 2021-10-26
