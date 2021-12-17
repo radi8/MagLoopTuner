@@ -77,10 +77,20 @@ struct btns {
 #endif
 } KI; //Key state information
 
-#define MENU_ITEMS 4
-const char *menu_main[MENU_ITEMS] = { " *** STATUS *** ", "Restoring Last C", "Tune Rate     X1", "Current Band 20M" };
-const char *menu_top[MENU_ITEMS] = { "Get Band", "Set Band", "Calibrate", "EXIT" };
-const char *menu_band[MENU_ITEMS] = { "Band = 30M", "Band = 20M", "Band = 17M", "Band = 15M"};
+
+/*
+  const char *menu_main[menuRows] = { " *** STATUS *** ", "Restoring Last C", "Tune Rate     X1", "Current Band 20M" };
+  const char *menu_top[menuRows] = { "Get Band", "Set Band", "Calibrate", "EXIT" };
+  const char *menu_band[menuRows] = { "Band = 30M", "Band = 20M", "Band = 17M", "Band = 15M"};
+*/
+
+#define menuRows 4
+const char *myMenus[4][4] = {
+  { " *** STATUS *** ", "Restoring Last C", "Tune Rate     X1", "Current Band 20M" },
+  { "Get Band", "Set Band", "Calibrate", "EXIT" },
+  { "Band = 30M", "Band = 20M", "Band = 17M", "Band = 15M"},
+  { "Tune to bottom", "of the band", "OK", "CANCEL"}
+};
 
 
 int encoderPosCount = 0;
@@ -139,18 +149,18 @@ void setup() {
     eeAddress += sizeof(minimumC);
     EEPROM.get(eeAddress, maximumC);
     eeAddress += sizeof(maximumC);
-    Serial.println (F("\n-------------------\n  EEPROM VALUES"));
-    Serial.print (F("magicNum = "));
-    Serial.println (magicNum);
-    Serial.print (F("interrupt2maxC = "));
-    Serial.println (interrupt2maxC);
-    Serial.print (F("backlash = "));
-    Serial.println (backlash);
-    Serial.print (F("minimumC = "));
-    Serial.println (minimumC);
-    Serial.print (F("maximumC = "));
-    Serial.println (maximumC);
-    Serial.println (F("-------------------"));
+    Serial.println(F("\n-------------------\n  EEPROM VALUES"));
+    Serial.print(F("magicNum = "));
+    Serial.println(magicNum);
+    Serial.print(F("interrupt2maxC = "));
+    Serial.println(interrupt2maxC);
+    Serial.print(F("backlash = "));
+    Serial.println(backlash);
+    Serial.print(F("minimumC = "));
+    Serial.println(minimumC);
+    Serial.print(F("maximumC = "));
+    Serial.println(maximumC);
+    Serial.println(F("-------------------"));
 
   } else { // No valid calibration data so flash the LED's to warn of non-calibration
     for (int x = 0; x < 10; x++) {
@@ -168,18 +178,18 @@ void setup() {
   u8x8.begin();
   u8x8.setPowerSave(0);
   u8x8.setFont(u8x8_font_7x14_1x2_r); // 4 rows of 16 chars (We stay with this font for all printing)
-/*
-  u8x8.drawString(0, 0, " *** STATUS *** ");
-  u8x8.setInverseFont(1);
-  u8x8.drawString(0, 2, "Restoring Last C");
-  u8x8.setInverseFont(0);
-  u8x8.drawString(0, 4, "Tune Rate     X1");
-  //
-  u8x8.drawString(0, 6, "Current Band 20M");
-  //
-  //  u8x8.drawString(0,6,"1234567890123456");
-*/
-  drawMenu(1, 0);
+  /*
+    u8x8.drawString(0, 0, " *** STATUS *** ");
+    u8x8.setInverseFont(1);
+    u8x8.drawString(0, 2, "Restoring Last C");
+    u8x8.setInverseFont(0);
+    u8x8.drawString(0, 4, "Tune Rate     X1");
+    //
+    u8x8.drawString(0, 6, "Current Band 20M");
+    //
+    //  u8x8.drawString(0,6,"1234567890123456");
+  */
+  drawMenu(0, 2);
   setPosition(); // set the zero position
 }
 
@@ -209,7 +219,7 @@ void loop()
   // Test for a rotary encoder CLK HIGH to LOW transition
   if ((KI.btn3_State == 0x0000) && (KI.btn3_State != KI.KY_040_CLK_Hist)) {
     KI.KY_040_CLK_Hist = KI.btn3_State;
-    Serial.println("HIGH to LOW transition");
+    Serial.println(F("HIGH to LOW transition"));
     // if the knob is rotating, we need to determine direction We do that by reading pin B state
     // and comparing to pinA's (both pins are equal when encoder is stationary).
     // We know pinA has gone from 1 -> 0 so see if pinB is also 0 yet
@@ -225,7 +235,7 @@ void loop()
   // Test for a rotary encoder CLK LOW to HIGH transition
   if ((KI.btn3_State == 0xFFFF) && (KI.btn3_State != KI.KY_040_CLK_Hist)) {
     KI.KY_040_CLK_Hist = KI.btn3_State;
-    Serial.println("LOW to HIGH transition");
+    Serial.println(F("LOW to HIGH transition"));
     if (KI.btn4_State == 0x0000) {
       // Means pin A Changed first - We're Rotating Clockwise
       bCW = true;
@@ -239,7 +249,7 @@ void loop()
 
   if ((KI.btn1_State == 0x0000) && (KI.btn1_State != KI.Cal_button_history)) { // Button has changed state
     KI.Cal_button_history = 0x0000;
-    Serial.println ("Calibrate button press detected");
+    Serial.println(F("Calibrate button press detected"));
     calibrate();
   }
   if ((KI.btn1_State == 0xFFFF) && (KI.btn1_State != KI.Cal_button_history)) { // Button has gone to released
@@ -259,15 +269,20 @@ void loop()
   }
   if ((KI.btn2_State == 0xFFFF) && (KI.btn2_State != KI.KY_040_pBtn_Hist)) { // Button was released
     KI.KY_040_pBtn_Hist = 0xFFFF;
-    Serial.print("buttonTime + = "); Serial.print(buttonTime + 1000000);
-    Serial.print(" & micros() = "); Serial.println(micros());
+    Serial.print(F("buttonTime + = ")); Serial.print(buttonTime + 1000000);
+    Serial.print(F(" & micros() = ")); Serial.println(micros());
     if (menuMode) {
-      loopMenu();
+
+
+      drawMenu(0, 0);
+
+
     } else {
       if ((buttonTime + 1000000) < micros()) { // check for a long press
         // We are going into menu mode
         Serial.println(F("We are going into menu mode"));
         menuMode = true;
+        drawMenu(1, 1);
       } else {
         // We are staying in stepper mode
         Serial.println(F("We are staying in stepper mode"));
@@ -280,6 +295,7 @@ void loop()
           ledState = true;
           u8x8.drawString(15, 4, "5");
         }
+        u8x8.setInverseFont(0);
       }
     }
     buttonTime = 0;
@@ -290,47 +306,46 @@ void loop()
 // Subroutines start here
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void updateMenu(void) {
-/*
-  if ( uiKeyCode != KEY_NONE && last_key_code == uiKeyCode ) {
-    return;
-  }
-  last_key_code = uiKeyCode;
+  /*
+    if ( uiKeyCode != KEY_NONE && last_key_code == uiKeyCode ) {
+      return;
+    }
+    last_key_code = uiKeyCode;
 
-  switch ( uiKeyCode ) {
-    case KEY_NEXT:
-      menu_current_row++;
-      if ( menu_current_row >= MENU_ITEMS )
-        menu_current_row = 0;
-      menu_redraw_required = 1;
-      break;
-    case KEY_PREV:
-      if ( menu_current_row == 0 )
-        menu_current_row = MENU_ITEMS;
-      menu_current_row--;
-      menu_redraw_required = 1;
-      break;
-  }
+    switch ( uiKeyCode ) {
+      case KEY_NEXT:
+        menu_current_row++;
+        if ( menu_current_row >= menuRows )
+          menu_current_row = 0;
+        menu_redraw_required = 1;
+        break;
+      case KEY_PREV:
+        if ( menu_current_row == 0 )
+          menu_current_row = menuRows;
+        menu_current_row--;
+        menu_redraw_required = 1;
+        break;
+    }
   */
 }
+
 //*************************************************************************************
-void drawMenu(uint8_t CURRENT_MENU, uint8_t highlightRow) {
+void drawMenu(uint8_t selectMenu, uint8_t highlightRow) {
 
-  uint8_t i, j;
-  uint8_t s, w, h, d;
+  uint8_t i;
 
-  for ( i = 0; i < MENU_ITEMS; i++ ) {
-    if (CURRENT_MENU == 1) {
-      u8x8.drawString(0, i * 2, menu_main[i*2]);
-    } else {
-      u8x8.drawString(d, i * h, menu_top[i*2]);
+  u8x8.clear();
+  for ( i = 0; i < menuRows; i++ ) {
+    if ((i + 1) == (highlightRow)) {
+      u8x8.setInverseFont(1);
     }
+    u8x8.drawString(0, i * 2, myMenus[selectMenu][i]);
     u8x8.setInverseFont(0);
   }
-
 }
-
-void loopMenu()
-{
+/*
+  void loopMenu()
+  {
   Serial.println(F("Processing menu pushButton"));
   u8x8.clear();
   u8x8.setInverseFont(1);
@@ -339,9 +354,9 @@ void loopMenu()
   u8x8.drawString(0, 2, "Set Band");
   u8x8.drawString(0, 4, "Calibrate");
   u8x8.drawString(0, 6, "EXIT");
-}
-
-/**********************************************************************************************************/
+  }
+*/
+//*************************************************************************************
 void printPosition(void)
 {
   int cnt;
@@ -368,9 +383,10 @@ void printPosition(void)
   }
 
   u8x8.drawString(12, 2, encoderPosString);
+  u8x8.setInverseFont(0);
 }
 
-/**********************************************************************************************************/
+//*************************************************************************************
 void rotaryEncoderStep(boolean bCW, boolean &ledState)
 {
   if (bCW == true) {
@@ -397,7 +413,7 @@ void rotaryEncoderStep(boolean bCW, boolean &ledState)
   printPosition();
 }
 
-/**********************************************************************************************************/
+//*************************************************************************************
 void calibrate()
 // Calibrate the zero position
 {
@@ -418,10 +434,10 @@ void calibrate()
           rotate(-500, .1); // Step clockwise
         }
         //        stepFromEndstop();
-        Serial.print (F("case 1, currentPosn start = "));
-        Serial.print (currentPosn);
-        Serial.print (F("; endStopPin = "));
-        Serial.println (digitalRead(endStopPin));
+        Serial.print(F("case 1, currentPosn start = "));
+        Serial.print(currentPosn);
+        Serial.print(F("; endStopPin = "));
+        Serial.println(digitalRead(endStopPin));
         while (!endStatus) {
           rotate(1, .1); // Step clockwise
           counter++;
@@ -429,9 +445,9 @@ void calibrate()
           //    delay(1); // Add delay here to slow down switch rotation speed
         }
         currentPosn = 0;
-        Serial.print (F("case 1, currentPosnA = "));
-        Serial.print (currentPosn);
-        Serial.print (F(":  counterA = "));
+        Serial.print(F("case 1, currentPosnA = "));
+        Serial.print(currentPosn);
+        Serial.print(F(":  counterA = "));
         Serial.println(counter);
         break;
       }
@@ -456,8 +472,8 @@ void calibrate()
           digitalWrite(LED_BUILTIN, LOW);
           anticlock[x] = counter - 1; // anticlock holds steps out of interrupter
 
-          Serial.print (F("case 2, anticlock backlash = "));
-          Serial.println (counter);
+          Serial.print(F("case 2, anticlock backlash = "));
+          Serial.println(counter);
           counter = 0;
 
           delay(100); // Wait for things to mechanically settle
@@ -473,49 +489,49 @@ void calibrate()
 
           delay(100); // Wait for things to mechanically settle
 
-          Serial.print (F("case 2, clockwise backlash = "));
-          Serial.println (counter); // Counter holds steps to go back
+          Serial.print(F("case 2, clockwise backlash = "));
+          Serial.println(counter); // Counter holds steps to go back
           counter = 0;
         }
         for (int x = 0; x < 10; x++) {
           Aclock += anticlock[x];
-          Serial.print (F("anticlock[x] = "));
-          Serial.print (anticlock[x]); Serial.print("; "); Serial.println(Aclock);
+          Serial.print(F("anticlock[x] = "));
+          Serial.print(anticlock[x]); Serial.print(F("; ")); Serial.println(Aclock);
           clockW += clockwise[x];
-          Serial.print (F("clockwise[x] = "));
-          Serial.print (clockwise[x]); Serial.print("; "); Serial.println(clockW);
+          Serial.print(F("clockwise[x] = "));
+          Serial.print(clockwise[x]); Serial.print(F("; ")); Serial.println(clockW);
         }
         backlash = (Aclock + clockW) / 10 / 2;
-        Serial.println (backlash);
+        Serial.println(backlash);
         counter = 0;
         currentPosn = 0;
-        Serial.println (F("\nPLEASE MANUALLY TUNE TO MAX C AND PRESS CAL BUTTON\n"));
+        Serial.println(F("\nPLEASE MANUALLY TUNE TO MAX C AND PRESS CAL BUTTON\n"));
         break;
       }
     case 3:
       {
         interrupt2maxC = abs(currentPosn);
-        Serial.print (F("case 3, interrupt2maxC = "));
-        Serial.println (interrupt2maxC);
+        Serial.print(F("case 3, interrupt2maxC = "));
+        Serial.println(interrupt2maxC);
         counter = 0;
         currentPosn = 0;
-        Serial.println (F("\nPLEASE MANUALLY TUNE TO MIN C AND PRESS CAL BUTTON\n"));
+        Serial.println(F("\nPLEASE MANUALLY TUNE TO MIN C AND PRESS CAL BUTTON\n"));
         break;
       }
     case 4:
       {
-        Serial.print (F("case 4, currentPosnA = "));
-        Serial.println (currentPosn);
+        Serial.print(F("case 4, currentPosnA = "));
+        Serial.println(currentPosn);
         mode = 0;
 
-        Serial.print (F("case 4, interrupt2maxC = "));
-        Serial.println (interrupt2maxC);
-        Serial.print (F("case 4, backlash = "));
-        Serial.println (backlash);
-        Serial.print (F("case 4, minimumC = "));
-        Serial.println (minimumC);
-        Serial.print (F("case 4, maximumC = "));
-        Serial.println (maximumC);
+        Serial.print(F("case 4, interrupt2maxC = "));
+        Serial.println(interrupt2maxC);
+        Serial.print(F("case 4, backlash = "));
+        Serial.println(backlash);
+        Serial.print(F("case 4, minimumC = "));
+        Serial.println(minimumC);
+        Serial.print(F("case 4, maximumC = "));
+        Serial.println(maximumC);
 
         // Store the calibration values
         int  eeAddress = 0;
@@ -537,8 +553,7 @@ void calibrate()
 
 }
 
-/**********************************************************************************************************/
-
+//*************************************************************************************
 void stepFromEndstop()
 //  Check if we are sitting with the end indicator operated i.e. at max C or close to it and step towards
 // minimum C enough to be clear of backlash for calibrating or initial setting.
@@ -547,8 +562,8 @@ void stepFromEndstop()
     rotate(-500, .1); // Step clockwise
   }
 }
-/**********************************************************************************************************/
 
+//*************************************************************************************
 void setPosition()
 // Called by setup
 
@@ -569,8 +584,8 @@ void setPosition()
   int endStatus = digitalRead(endStopPin); //High when interrupted
   uint16_t counter = 0;
 
-  Serial.print ("Counter initial value = ");
-  Serial.println (counter);
+  Serial.print(F("Counter initial value = "));
+  Serial.println(counter);
 
   // Test to see if we have operated the interrupter
 
@@ -582,20 +597,20 @@ void setPosition()
     delay(500);
     rotate(-500, .1); // Step anticlockwise out of the interrupter
     counter = 500; // set counter to match steps taken
-    Serial.print ("Counter maximum value = ");
-    Serial.println (counter);
+    Serial.print(F("Counter maximum value = "));
+    Serial.println(counter);
     endStatus = digitalRead(endStopPin);
     while (!endStatus) {
       rotate(1, .1); // Step clockwise
       counter--;
-      //      Serial.print (F("Counter value = ")); Serial.println (counter);
+      //      Serial.print(F("Counter value = ")); Serial.println(counter);
       endStatus = digitalRead(endStopPin);
     }
     currentPosn = interrupt2maxC; // Set our reference value at interrupter change to high
-    Serial.print (F("currentPosn = "));
-    Serial.print (currentPosn);
-    Serial.print (F("; -- Counter value at reference = "));
-    Serial.println (counter);
+    Serial.print(F("currentPosn = "));
+    Serial.print(currentPosn);
+    Serial.print(F("; -- Counter value at reference = "));
+    Serial.println(counter);
     while (counter) {
       rotate(1, .1); // Step clockwise to original position
       counter--; // currentPosn is adjusted in the rotate routine
@@ -608,27 +623,27 @@ void setPosition()
       endStatus = digitalRead(endStopPin);
     }
     currentPosn = interrupt2maxC;
-    Serial.print (F("currentPosn = "));
-    Serial.print (currentPosn);
-    Serial.print (F("; -- Counter value at reference = "));
-    Serial.println (counter);
+    Serial.print(F("currentPosn = "));
+    Serial.print(currentPosn);
+    Serial.print(F("; -- Counter value at reference = "));
+    Serial.println(counter);
     while (counter) {
       rotate(-1, .1); // Step anticlockwise to original position
       counter--; // currentPosn is adjusted in the rotate routine
     }
   }
   mode = 0; // Set to normal stepper operation
-  Serial.print (F("\ncurrentPosn = "));
-  Serial.print (currentPosn);
+  Serial.print(F("\ncurrentPosn = "));
+  Serial.print(currentPosn);
   //  itoa(currentPosn, encoderPosString, 10);
-  Serial.print (F(":  counter = "));
+  Serial.print(F(":  counter = "));
   Serial.println(counter);
-  //  itoa(currentPosn, encoderPosString, 10);
-  //  u8x8.drawString(12, 0, encoderPosString);
+
   u8x8.drawString(0, 2, "Step Posn = ");
   printPosition();
 }
-/**********************************************************************************************************/
+
+//*************************************************************************************
 void rotate(int steps, float speed) {
   // Rotate a specific number of microsteps (8 microsteps per step) - (negitive for reverse movement)
   // speed is any number from .01 -> 1 with 1 being fastest - Slower is stronger
@@ -660,6 +675,7 @@ void rotate(int steps, float speed) {
     //
     if ((currentPosn <= maximumC) && rotationDirection) { // maximumC is at currentPosn = 0
       digitalWrite(maxCendstop, HIGH);
+      u8x8.setInverseFont(1);
       if (!mode) { // Don't honour endstops if in "Calibrate mode"
         break; // Only let it step clockwise if at end stop
       }
@@ -668,6 +684,7 @@ void rotate(int steps, float speed) {
     }
     if ((currentPosn >= minimumC) && !rotationDirection) { // minimumC is at currentPosn = 2700
       digitalWrite(minCendstop, HIGH);
+      u8x8.setInverseFont(1);
       if (!mode) { // Don't honour endstops if in "Calibrate mode"
         break; // Only let it step anticlockwise if at maximum
       }
@@ -688,7 +705,8 @@ void rotate(int steps, float speed) {
   } // End of for loop
   digitalWrite(enablePin, HIGH); // Disable EasyDriver stepper driver stage
 }
-/**********************************************************************************************************/
+
+//*************************************************************************************
 void updateButton(void) {
 
   // Get the current button state.
@@ -703,7 +721,7 @@ void updateButton(void) {
 
 #ifdef FEATURE_DEBUG_BTNS
   if (KI.count == 0) {
-    Serial.print(KI.count); Serial.print("\t");
+    Serial.print(KI.count); Serial.print(F("\t"));
     Serial.println(KI.btn1_State, BIN);
     KI.count++;
   }
@@ -713,11 +731,11 @@ void updateButton(void) {
 
 #ifdef FEATURE_DEBUG_BTNS
   if ((KI.count <= 25) && (KI.count != 0xFF)) {
-    Serial.print(KI.count); Serial.print("\t");
+    Serial.print(KI.count); Serial.print(F("\t"));
     Serial.println(KI.btn1_State, BIN);
     KI.count++;
   } else {
-    if (KI.count != 0xFF) Serial.println("-----------------------------------------");
+    if (KI.count != 0xFF) Serial.println(F("-----------------------------------------"));
     KI.count = 0xFF;
   }
 #endif
@@ -725,7 +743,7 @@ void updateButton(void) {
     KI.btn1_State = 0x5555;
 #ifdef FEATURE_DEBUG_BTNS
     KI.count = 0;
-    Serial.println("Released");
+    Serial.println(F("Released"));
 #endif
   }
   if ((KI.btn1_State & MASK1) == pressPattern) {
@@ -733,7 +751,7 @@ void updateButton(void) {
     KI.btn1_State = 0xAAAA;
 #ifdef FEATURE_DEBUG_BTNS
     KI.count = 0;
-    Serial.println("Pressed");
+    Serial.println(F("Pressed"));
 #endif
   }
 
@@ -765,3 +783,4 @@ void updateButton(void) {
   }
 #endif
 }
+//*************************************************************************************
