@@ -77,6 +77,12 @@ struct btns {
 #endif
 } KI; //Key state information
 
+#define MENU_ITEMS 4
+const char *menu_main[MENU_ITEMS] = { " *** STATUS *** ", "Restoring Last C", "Tune Rate     X1", "Current Band 20M" };
+const char *menu_top[MENU_ITEMS] = { "Get Band", "Set Band", "Calibrate", "EXIT" };
+const char *menu_band[MENU_ITEMS] = { "Band = 30M", "Band = 20M", "Band = 17M", "Band = 15M"};
+
+
 int encoderPosCount = 0;
 char encoderPosString[5]; // The count needs to be a string for the display
 int mode = -1; // -1 = initialize; 0 = normal tuning; 1 to 4 = calibration modes.
@@ -162,7 +168,7 @@ void setup() {
   u8x8.begin();
   u8x8.setPowerSave(0);
   u8x8.setFont(u8x8_font_7x14_1x2_r); // 4 rows of 16 chars (We stay with this font for all printing)
-
+/*
   u8x8.drawString(0, 0, " *** STATUS *** ");
   u8x8.setInverseFont(1);
   u8x8.drawString(0, 2, "Restoring Last C");
@@ -172,7 +178,8 @@ void setup() {
   u8x8.drawString(0, 6, "Current Band 20M");
   //
   //  u8x8.drawString(0,6,"1234567890123456");
-
+*/
+  drawMenu(1, 0);
   setPosition(); // set the zero position
 }
 
@@ -282,6 +289,46 @@ void loop()
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Subroutines start here
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void updateMenu(void) {
+/*
+  if ( uiKeyCode != KEY_NONE && last_key_code == uiKeyCode ) {
+    return;
+  }
+  last_key_code = uiKeyCode;
+
+  switch ( uiKeyCode ) {
+    case KEY_NEXT:
+      menu_current_row++;
+      if ( menu_current_row >= MENU_ITEMS )
+        menu_current_row = 0;
+      menu_redraw_required = 1;
+      break;
+    case KEY_PREV:
+      if ( menu_current_row == 0 )
+        menu_current_row = MENU_ITEMS;
+      menu_current_row--;
+      menu_redraw_required = 1;
+      break;
+  }
+  */
+}
+//*************************************************************************************
+void drawMenu(uint8_t CURRENT_MENU, uint8_t highlightRow) {
+
+  uint8_t i, j;
+  uint8_t s, w, h, d;
+
+  for ( i = 0; i < MENU_ITEMS; i++ ) {
+    if (CURRENT_MENU == 1) {
+      u8x8.drawString(0, i * 2, menu_main[i*2]);
+    } else {
+      u8x8.drawString(d, i * h, menu_top[i*2]);
+    }
+    u8x8.setInverseFont(0);
+  }
+
+}
+
 void loopMenu()
 {
   Serial.println(F("Processing menu pushButton"));
@@ -293,6 +340,7 @@ void loopMenu()
   u8x8.drawString(0, 4, "Calibrate");
   u8x8.drawString(0, 6, "EXIT");
 }
+
 /**********************************************************************************************************/
 void printPosition(void)
 {
@@ -321,6 +369,8 @@ void printPosition(void)
 
   u8x8.drawString(12, 2, encoderPosString);
 }
+
+/**********************************************************************************************************/
 void rotaryEncoderStep(boolean bCW, boolean &ledState)
 {
   if (bCW == true) {
@@ -346,8 +396,8 @@ void rotaryEncoderStep(boolean bCW, boolean &ledState)
 
   printPosition();
 }
-/**********************************************************************************************************/
 
+/**********************************************************************************************************/
 void calibrate()
 // Calibrate the zero position
 {
