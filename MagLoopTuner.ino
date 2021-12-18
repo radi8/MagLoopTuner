@@ -93,12 +93,12 @@ const char *myMenus[4][4] = {
 };
 
 
-int encoderPosCount = 0;
+uint16_t encoderPosCount = 80;
 char encoderPosString[5]; // The count needs to be a string for the display
 int mode = -1; // -1 = initialize; 0 = normal tuning; 1 to 4 = calibration modes.
 
 // Stepper motor state variables loaded from EEprom at startup
-uint16_t interrupt2maxC = 0;
+uint16_t interrupt2maxC = 80;
 uint16_t backlash = 0;
 uint16_t minimumC = stepsPerShaftRev / 2 * microStepsPerStep * 1; // Drive it right to the end
 uint16_t maximumC = 0; // Position 0 is plates fully meshed
@@ -106,7 +106,7 @@ uint16_t maximumC = 0; // Position 0 is plates fully meshed
 // As we are stepping anticlockwise if not already at the interrupter location or less, starting
 // with current posn = 2700 prevents us from ever reaching maximum capacitance and trying to go
 // less than currentPosn = 0. We treat being at interrupter or less separately
-int currentPosn = 2700;
+uint16_t currentPosn = 2700;
 
 unsigned int eepromTermAddr = 0;
 
@@ -173,7 +173,20 @@ void setup() {
       digitalWrite(LED_BUILTIN, LOW); // Turn off the LED's
       delay(500);
     }
+
   }
+  Serial.println(F("\n-------------------\n  EEPROM VALUES"));
+  Serial.print(F("magicNum = "));
+  Serial.println(magicNum);
+  Serial.print(F("interrupt2maxC = "));
+  Serial.println(interrupt2maxC);
+  Serial.print(F("backlash = "));
+  Serial.println(backlash);
+  Serial.print(F("minimumC = "));
+  Serial.println(minimumC);
+  Serial.print(F("maximumC = "));
+  Serial.println(maximumC);
+  Serial.println(F("-------------------"));
 
   u8x8.begin();
   u8x8.setPowerSave(0);
@@ -362,24 +375,28 @@ void printPosition(void)
   int cnt;
 
   itoa(currentPosn, encoderPosString, 10);
-  if (currentPosn < 10) {
-    // Shift right 3 places with blanks in 1st 3 places
-    encoderPosString[3] = encoderPosString[0];
-    encoderPosString[0] = " ";
-    encoderPosString[1] = " ";
-    encoderPosString[2] = " ";
-  } else if (currentPosn < 100) {
-    // Shift right 2 places with blanks in 1st 2 places
-    encoderPosString[3] = encoderPosString[1];
-    encoderPosString[2] = encoderPosString[0];
-    encoderPosString[0] = " ";
-    encoderPosString[1] = " ";
-  } else if (currentPosn < 1000) {
+
+  if ((currentPosn < 1000) & (currentPosn > 99)) {
     // Shift right 1 place with blank in 1st place
     encoderPosString[3] = encoderPosString[2];
     encoderPosString[2] = encoderPosString[1];
     encoderPosString[1] = encoderPosString[0];
     encoderPosString[0] = ' ';
+    Serial.print("< 1000, encoderPosString = "); Serial.println(encoderPosString);
+  } else if ((currentPosn < 100) & (currentPosn > 9)) {
+    // Shift right 2 places with blanks in 1st 2 places
+    encoderPosString[3] = encoderPosString[1];
+    encoderPosString[2] = encoderPosString[0];
+    encoderPosString[0] = ' ';
+    encoderPosString[1] = ' ';
+    Serial.print("< 100, encoderPosString = "); Serial.println(encoderPosString);
+  } else if (currentPosn < 10) {
+    // Shift right 3 places with blanks in 1st 3 places
+    encoderPosString[3] = encoderPosString[0];
+    encoderPosString[0] = ' ';
+    encoderPosString[1] = ' ';
+    encoderPosString[2] = ' ';
+    Serial.print("<10, encoderPosString = "); Serial.println(encoderPosString);
   }
 
   u8x8.drawString(12, 2, encoderPosString);
@@ -565,21 +582,32 @@ void stepFromEndstop()
 
 //*************************************************************************************
 void setPosition()
-// Called by setup
+// Called by setup to restore the capacitor to its last used position.
 
-// There are two possible states here on powerup. (1) the capacitor position is such that we are activating
-// the interrupter or (2) we are stepped beyond the interrupter. In both cases we need to be stepped beyond
-// the interrupter and step back to it where we mark the position using this as a reference from the
-// interrupt2maxC calibration data stored in EEprom.
+// There are 4 possible states here on powerup.
+// (1) The capacitor position is such that we are activating the interrupter (0 to interrupt2maxC steps)
+// (2) we are stepped beyond the interrupter. In both of these cases we need to be stepped beyond
+//   the interrupter and step back to it where we mark the position using this as a reference from the
+//   interrupt2maxC (0 shaft degrees) calibration data stored in EEprom.
+// (3) The capacitor is in an illegal position beyond 180 degrees of rotation
+// (4) There is no stepper unit plugged in causing the unit to hunt indefinitely for the interrupter.
 
-// (1) We will rotate 500 steps anticlockwise to step out of the interrupter, counting the steps. We then
-// rotate clockwise back to the interrupter and set the position reference then continue counting back the
-// rest of the 500 steps to restore the original position
+// (1) We will rotate 500 steps anticlockwise to step beyond the interrupter, counting the steps. We then
+//    rotate clockwise back to the interrupter and set the position reference then continue counting back
+//    the rest of the 500 steps to restore the original position.
 
 // (2) We are rotating clockwise (facing the capacitor shaft) to increase the capacity until it reaches the
-// interrupter. We count each step taken to do this. When the interrupter is reached the current position is set
-// to interrupt2maxC and we command the stepper to step anticlockwise the number of steps counted to restore
-// the original position.
+//    interrupter. We count each step taken to do this. When the interrupter is reached the current position
+//    is set to interrupt2maxC and we command the stepper to step back anticlockwise the number of steps
+//    counted to restore the original position.
+
+// (3) We detect this issue by checking at interrupt for counter > 2700 - interrupt2maxC which will only
+//    occur if we started from beyond 180 degrees of capacitor rotation.
+
+// (4) This is detected by checking that counter has gone beyond 5400 i.e. has rotated 360 degrees without
+//    finding an interrupt. Tuning is stopped and the position is fudged by setting currentPosn to
+//    1883 (20M) and returning
+
 {
   int endStatus = digitalRead(endStopPin); //High when interrupted
   uint16_t counter = 0;
@@ -587,8 +615,8 @@ void setPosition()
   Serial.print(F("Counter initial value = "));
   Serial.println(counter);
 
-  // Test to see if we have operated the interrupter
-
+  // Test to see if we are sitting with the interrupter operated (With no interrupter plugged in, the
+  //  endStopPin - pin 8 - input will be pulled high)
   if (endStatus) { // At interrupter so step beyond and back. (High when interrupted)
     mode = -1;
     rotate(-1, .01); // Set the backlash to be at a constant position
@@ -600,6 +628,16 @@ void setPosition()
     Serial.print(F("Counter maximum value = "));
     Serial.println(counter);
     endStatus = digitalRead(endStopPin);
+    
+    //  At this point we should be stepped beyond the interrupter and the endStopPin should be low.
+    //  if not we don't have an interrupter plugged in so we will fudge it. Also there will be no
+    //  Capacitor so we will ignore it.  
+    if (endStatus) { // Checking for the stepper unit being connected
+//      Serial.print("Fake step, counter value = "); Serial.println(counter);
+      // Faking due to no interrupter; force no more stepping with position at 80
+      counter = 0;
+    }
+
     while (!endStatus) {
       rotate(1, .1); // Step clockwise
       counter--;
@@ -612,8 +650,9 @@ void setPosition()
     Serial.print(F("; -- Counter value at reference = "));
     Serial.println(counter);
     while (counter) {
+      //      Serial.println("Got into while counter");
       rotate(1, .1); // Step clockwise to original position
-      counter--; // currentPosn is adjusted in the rotate routine
+      counter--; // Note: currentPosn is adjusted in the rotate routine
     }
   } else { // We were not at interrupter
     mode = -2;
@@ -621,24 +660,37 @@ void setPosition()
       rotate(1, .1); // Step clockwise
       counter++;
       endStatus = digitalRead(endStopPin);
+      if (counter > 5400) { // Checking for no stepper unit connected
+        Serial.print("Counter value = "); Serial.println(counter);
+        endStatus = true;
+        counter = 1883 - interrupt2maxC;
+      }
+    }
+    if (counter > (2700 - interrupt2maxC)) { // Checking for illegal initial capacitor position
+      counter = 1883 - interrupt2maxC;
     }
     currentPosn = interrupt2maxC;
     Serial.print(F("currentPosn = "));
     Serial.print(currentPosn);
-    Serial.print(F("; -- Counter value at reference = "));
+    Serial.print(F("; ** Counter value at reference = "));
     Serial.println(counter);
     while (counter) {
       rotate(-1, .1); // Step anticlockwise to original position
       counter--; // currentPosn is adjusted in the rotate routine
     }
   }
+
   mode = 0; // Set to normal stepper operation
+  //  if(currentPosn > 2700) currentPosn = 2500;
   Serial.print(F("\ncurrentPosn = "));
   Serial.print(currentPosn);
   //  itoa(currentPosn, encoderPosString, 10);
   Serial.print(F(":  counter = "));
   Serial.println(counter);
 
+  // TODO fix the capacitor being driven out of range or starting with antenna not connected
+
+  u8x8.setInverseFont(0);
   u8x8.drawString(0, 2, "Step Posn = ");
   printPosition();
 }
