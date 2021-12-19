@@ -25,7 +25,7 @@ const uint8_t STEP_PIN    = 3;  // Connected to the EasyDriver board
 #define BTN4_PIN 5              // Connected to DT on KY-040
 #define BTN2_PIN 6              // Connected to Push Button on KY-040
 #define BTN1_PIN 7              // Connected to the calibrate button
-const uint8_t endStopPin  = 8;  // Connected to the interrupter
+const uint8_t interrupterPin  = 8;  // Connected to the interrupter
 const uint8_t enablePin  = 9;  // Connected to the !ENABLE Pin on the EasyDriver board
 const uint8_t maxCendstop = 10; // Connected to LED indicator
 const uint8_t minCendstop = 12; // Connected to LED indicator
@@ -128,7 +128,7 @@ void setup() {
   pinMode(BTN2_PIN, INPUT_PULLUP); // Encoder pushbutton
   pinMode(BTN3_PIN, INPUT_PULLUP); // CLK on KY-040 (pin4)
   pinMode(BTN4_PIN, INPUT_PULLUP); // DT on KY-040 (pin 5)
-  pinMode(endStopPin, INPUT_PULLUP);
+  pinMode(interrupterPin, INPUT_PULLUP); // Interrupter
 
   //Initialize serial and wait for port to open:
   Serial.begin(112500);
@@ -175,7 +175,7 @@ void setup() {
     }
 
   }
-  Serial.println(F("\n-------------------\n  EEPROM VALUES"));
+  Serial.println(F("-------------------\n  EEPROM VALUES"));
   Serial.print(F("magicNum = "));
   Serial.println(magicNum);
   Serial.print(F("interrupt2maxC = "));
@@ -186,24 +186,13 @@ void setup() {
   Serial.println(minimumC);
   Serial.print(F("maximumC = "));
   Serial.println(maximumC);
-  Serial.println(F("-------------------"));
+  Serial.println(F("-------------------\n"));
 
   u8x8.begin();
   u8x8.setPowerSave(0);
   u8x8.setFont(u8x8_font_7x14_1x2_r); // 4 rows of 16 chars (We stay with this font for all printing)
-  /*
-    u8x8.drawString(0, 0, " *** STATUS *** ");
-    u8x8.setInverseFont(1);
-    u8x8.drawString(0, 2, "Restoring Last C");
-    u8x8.setInverseFont(0);
-    u8x8.drawString(0, 4, "Tune Rate     X1");
-    //
-    u8x8.drawString(0, 6, "Current Band 20M");
-    //
-    //  u8x8.drawString(0,6,"1234567890123456");
-  */
   drawMenu(0, 2);
-  setPosition(); // set the zero position
+  setPosition(); // Set the capacitor to last position and calculate what step it is on.
 }
 
 void loop()
@@ -435,7 +424,7 @@ void calibrate()
 // Calibrate the zero position
 {
   mode++;
-  int endStatus = 0;
+  int interrupterStatus = 0;
 
   int clockwise[10];
   int anticlock[10];
@@ -447,18 +436,18 @@ void calibrate()
   switch (mode) {
     case 1:
       {
-        if (digitalRead(endStopPin)) { //High when interrupted
+        if (digitalRead(interrupterPin)) { //High when interrupted
           rotate(-500, .1); // Step clockwise
         }
         //        stepFromEndstop();
         Serial.print(F("case 1, currentPosn start = "));
         Serial.print(currentPosn);
-        Serial.print(F("; endStopPin = "));
-        Serial.println(digitalRead(endStopPin));
-        while (!endStatus) {
+        Serial.print(F("; interrupterPin = "));
+        Serial.println(digitalRead(interrupterPin));
+        while (!interrupterStatus) {
           rotate(1, .1); // Step clockwise
           counter++;
-          endStatus = digitalRead(endStopPin);
+          interrupterStatus = digitalRead(interrupterPin);
           //    delay(1); // Add delay here to slow down switch rotation speed
         }
         currentPosn = 0;
@@ -474,13 +463,13 @@ void calibrate()
         // are required to take up the backlash and step off the interrupter then check how many
         // steps it takes to come back onto the interrupter. Average this over 5 steps
         counter = 0;
-        endStatus = digitalRead(endStopPin);
+        interrupterStatus = digitalRead(interrupterPin);
         for (int x = 0; x < 10; x++) {
-          if (endStatus) digitalWrite(LED_BUILTIN, HIGH);
-          while (endStatus) {
+          if (interrupterStatus) digitalWrite(LED_BUILTIN, HIGH);
+          while (interrupterStatus) {
             rotate(-1, .01); // Step anticlockwise slowly
             counter++;
-            endStatus = digitalRead(endStopPin);
+            interrupterStatus = digitalRead(interrupterPin);
           }
 
           rotate(-1, .01); // Take an extra step to be sure we have activated the interrupter
@@ -495,10 +484,10 @@ void calibrate()
 
           delay(100); // Wait for things to mechanically settle
 
-          while (!endStatus) {
+          while (!interrupterStatus) {
             rotate(1, .01); // Step clockwise into the interrupter
             counter++;
-            endStatus = digitalRead(endStopPin);
+            interrupterStatus = digitalRead(interrupterPin);
           }
           rotate(1, .01); // Take an extra step to be sure we have activated the interrupter
           counter++;
@@ -609,77 +598,80 @@ void setPosition()
 //    1883 (20M) and returning
 
 {
-  int endStatus = digitalRead(endStopPin); //High when interrupted
+  int interrupterStatus = digitalRead(interrupterPin); //High when interrupted
   uint16_t counter = 0;
 
   Serial.print(F("Counter initial value = "));
   Serial.println(counter);
 
-  // Test to see if we are sitting with the interrupter operated (With no interrupter plugged in, the
-  //  endStopPin - pin 8 - input will be pulled high)
-  if (endStatus) { // At interrupter so step beyond and back. (High when interrupted)
+  // Test to see if we are sitting with the interrupter operated.
+  // Note: With no interrupter plugged in, the interrupterPin (pin 8) pullup will be high.
+  if (interrupterStatus) { // At interrupter so step 500 steps beyond and back. (High when interrupted)
     mode = -1;
     rotate(-1, .01); // Set the backlash to be at a constant position
     delay(500);
     rotate(1, .01);
     delay(500);
     rotate(-500, .1); // Step anticlockwise out of the interrupter
-    counter = 500; // set counter to match steps taken
+    counter = 500; // set counter to match steps taken in preparation to step back to original posn.
     Serial.print(F("Counter maximum value = "));
     Serial.println(counter);
-    endStatus = digitalRead(endStopPin);
-    
-    //  At this point we should be stepped beyond the interrupter and the endStopPin should be low.
-    //  if not we don't have an interrupter plugged in so we will fudge it. Also there will be no
-    //  Capacitor so we will ignore it.  
-    if (endStatus) { // Checking for the stepper unit being connected
-//      Serial.print("Fake step, counter value = "); Serial.println(counter);
-      // Faking due to no interrupter; force no more stepping with position at 80
-      counter = 0;
+
+    //  At this point we should be stepped beyond the interrupter and the interrupterPin should be low.
+    //  if not we probably don't have the loop antenna plugged in so we will fudge it by setting
+    //  the counter to 0 so we don't tune further and allow currentPosn to be set to interrupt2maxC
+    interrupterStatus = digitalRead(interrupterPin); // Test to see if we are clear of the interrupter
+    if (interrupterStatus) {
+      counter = 0;  // Still interrupted so abort stepping 500 steps back
     }
 
-    while (!endStatus) {
+    while (!interrupterStatus) { // If loop not plugged in we won't do this, i.e. interrupterStatus will be true.
       rotate(1, .1); // Step clockwise
       counter--;
       //      Serial.print(F("Counter value = ")); Serial.println(counter);
-      endStatus = digitalRead(endStopPin);
+      interrupterStatus = digitalRead(interrupterPin);
     }
-    currentPosn = interrupt2maxC; // Set our reference value at interrupter change to high
+
+    currentPosn = interrupt2maxC; // Set to match our having reached the interrupter.
     Serial.print(F("currentPosn = "));
     Serial.print(currentPosn);
     Serial.print(F("; -- Counter value at reference = "));
     Serial.println(counter);
-    while (counter) {
+    while (counter) { // If loop not plugged in we won't do this, i.e. counter will be 0
       //      Serial.println("Got into while counter");
-      rotate(1, .1); // Step clockwise to original position
+      rotate(1, .1); // Continue stepping clockwise to original position
       counter--; // Note: currentPosn is adjusted in the rotate routine
-    }
-  } else { // We were not at interrupter
-    mode = -2;
-    while (!endStatus) {
-      rotate(1, .1); // Step clockwise
-      counter++;
-      endStatus = digitalRead(endStopPin);
-      if (counter > 5400) { // Checking for no stepper unit connected
-        Serial.print("Counter value = "); Serial.println(counter);
-        endStatus = true;
-        counter = 1883 - interrupt2maxC;
-      }
-    }
-    if (counter > (2700 - interrupt2maxC)) { // Checking for illegal initial capacitor position
-      counter = 1883 - interrupt2maxC;
-    }
-    currentPosn = interrupt2maxC;
-    Serial.print(F("currentPosn = "));
-    Serial.print(currentPosn);
-    Serial.print(F("; ** Counter value at reference = "));
-    Serial.println(counter);
-    while (counter) {
-      rotate(-1, .1); // Step anticlockwise to original position
-      counter--; // currentPosn is adjusted in the rotate routine
     }
   }
 
+  else { // We were not at interrupter so simply rotate back to it. If the capacitor is starting
+    //  from a point where it takes more than 180 degrees or 2700 steps to reach the interrupter
+    //  it was in an illegal angle so we set it to a default position
+    mode = -2;
+    while (!interrupterStatus) {  // Rotate continuously until the interrupter is reached
+      rotate(1, .1); // Step clockwise counting the steps taken
+      counter++;
+      interrupterStatus = digitalRead(interrupterPin);
+      //      if (counter > 5400) { // Checking for no stepper unit connected
+      //        Serial.print("Counter value = "); Serial.println(counter);
+      //        interrupterStatus = true;
+      //        counter = 1883 - interrupt2maxC;
+    }
+    Serial.print(F("Counter value at interrupter = ")); Serial.println(counter);
+    if (counter > (2701 - interrupt2maxC)) { // Checking for illegal initial capacitor position
+      counter = 1883 - interrupt2maxC;
+    }
+  }
+  currentPosn = interrupt2maxC;
+  Serial.print(F("currentPosn = "));
+  Serial.print(currentPosn);
+  Serial.print(F("; ** Counter value at reference = "));
+  Serial.println(counter);
+  while (counter) {
+    rotate(-1, .1); // Step anticlockwise to original position
+    counter--; // currentPosn is adjusted in the rotate routine
+  }
+  
   mode = 0; // Set to normal stepper operation
   //  if(currentPosn > 2700) currentPosn = 2500;
   Serial.print(F("\ncurrentPosn = "));
@@ -722,7 +714,7 @@ void rotate(int steps, float speed) {
   for (int i = 0; i < steps; i++) {
     // If not in calibration mode, detect the position light interrupter status
     if (mode == 0) {
-      y = digitalRead(endStopPin);
+      y = digitalRead(interrupterPin);
     }
     //
     if ((currentPosn <= maximumC) && rotationDirection) { // maximumC is at currentPosn = 0
