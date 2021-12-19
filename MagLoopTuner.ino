@@ -77,25 +77,20 @@ struct btns {
 #endif
 } KI; //Key state information
 
-
-/*
-  const char *menu_main[menuRows] = { " *** STATUS *** ", "Restoring Last C", "Tune Rate     X1", "Current Band 20M" };
-  const char *menu_top[menuRows] = { "Get Band", "Set Band", "Calibrate", "EXIT" };
-  const char *menu_band[menuRows] = { "Band = 30M", "Band = 20M", "Band = 17M", "Band = 15M"};
-*/
-
-#define menuRows 4
+#define menuPages 4
 const char *myMenus[4][4] = {
   { " *** STATUS *** ", "Restoring Last C", "Tune Rate     X1", "Current Band 20M" },
   { "Get Band", "Set Band", "Calibrate", "EXIT" },
   { "Band = 30M", "Band = 20M", "Band = 17M", "Band = 15M"},
   { "Tune to bottom", "of the band", "OK", "CANCEL"}
 };
-
+uint8_t menuMode = 0; // 0 = stepper mode & menus 1, 2, 3, 4
+uint8_t menuRow = 1; // current menu line can be 1, 2, 3, 4
 
 uint16_t encoderPosCount = 80;
 char encoderPosString[5]; // The count needs to be a string for the display
 int mode = -1; // -1 = initialize; 0 = normal tuning; 1 to 4 = calibration modes.
+
 
 // Stepper motor state variables loaded from EEprom at startup
 uint16_t interrupt2maxC = 80;
@@ -201,7 +196,6 @@ void loop()
   static uint8_t Rotary_Encoder_history = 0;
   static boolean ledState = true; // 1st time through loop LED will toggle to false
   static boolean tmp = true;
-  static boolean menuMode = false;
   boolean bCW;
 
   updateButton(); // Get the current state of all the buttons
@@ -273,40 +267,72 @@ void loop()
     KI.KY_040_pBtn_Hist = 0xFFFF;
     Serial.print(F("buttonTime + = ")); Serial.print(buttonTime + 1000000);
     Serial.print(F(" & micros() = ")); Serial.println(micros());
-    if (menuMode) {
+    // Get whether it was a short or long press
+    if ((buttonTime + 1000000) < micros()) { // check for a long press
+      Serial.println(F("it was a long press"));
+      switch (menuMode) {
+        case 0:
+          Serial.println(F("Case 0 Long"));
+          menuMode = 1;
+          drawMenu(1, 1);
+          menuRow = 1;
+          break;
+        default:
+          Serial.println(F("Exiting a sub menu - Long"));
+          menuMode = 0;
+          drawMenu(0, 0);
+          u8x8.drawString(0, 2, "Step Posn = ");
+          u8x8.drawString(12, 2, encoderPosString);
+          break;
+      }
+    }
 
-
-      drawMenu(0, 0);
-
-
-    } else {
-      if ((buttonTime + 1000000) < micros()) { // check for a long press
-        // We are going into menu mode
-        Serial.println(F("We are going into menu mode"));
-        menuMode = true;
-        drawMenu(1, 1);
-      } else {
-        // We are staying in stepper mode
-        Serial.println(F("We are staying in stepper mode"));
-        if (ledState) {
-          digitalWrite(LED_BUILTIN, LOW); // Turn off LED
-          ledState = false;
-          u8x8.drawString(15, 4, "1");
-        } else {
-          digitalWrite(LED_BUILTIN, HIGH);   // Turn on LED
-          ledState = true;
-          u8x8.drawString(15, 4, "5");
-        }
-        u8x8.setInverseFont(0);
+    else {
+      // We are processing a step speed change or selecting a sub menu item.
+      Serial.println(F("It was a short press"));
+      switch (menuMode) {
+        case 0: // Toggle the step rate
+          Serial.println(F("Case 0 short"));
+          if (ledState) {
+            digitalWrite(LED_BUILTIN, LOW); // Turn off LED
+            ledState = false;
+            u8x8.drawString(15, 4, "1");
+          } else {
+            digitalWrite(LED_BUILTIN, HIGH);   // Turn on LED
+            ledState = true;
+            u8x8.drawString(15, 4, "5");
+          }
+          u8x8.setInverseFont(0);
+          break;
+        case 1: // Choose from menu 1
+          Serial.println(F("Case 1 short"));
+          break;
+        case 2: // Choose from menu 2
+          Serial.println(F("Case 2 short"));
+          break;
       }
     }
     buttonTime = 0;
   }
 }
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Subroutines start here
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void drawMenu(uint8_t selectMenu, uint8_t highlightRow) {
+
+  uint8_t i;
+
+  u8x8.clear();
+  for ( i = 0; i < menuPages; i++ ) {
+    if ((i + 1) == (highlightRow)) {
+      u8x8.setInverseFont(1);
+    }
+    u8x8.drawString(0, i * 2, myMenus[selectMenu][i]);
+    u8x8.setInverseFont(0);
+  }
+}
+
 void updateMenu(void) {
   /*
     if ( uiKeyCode != KEY_NONE && last_key_code == uiKeyCode ) {
@@ -317,13 +343,13 @@ void updateMenu(void) {
     switch ( uiKeyCode ) {
       case KEY_NEXT:
         menu_current_row++;
-        if ( menu_current_row >= menuRows )
+        if ( menu_current_row >= menuPages )
           menu_current_row = 0;
         menu_redraw_required = 1;
         break;
       case KEY_PREV:
         if ( menu_current_row == 0 )
-          menu_current_row = menuRows;
+          menu_current_row = menuPages;
         menu_current_row--;
         menu_redraw_required = 1;
         break;
@@ -332,19 +358,6 @@ void updateMenu(void) {
 }
 
 //*************************************************************************************
-void drawMenu(uint8_t selectMenu, uint8_t highlightRow) {
-
-  uint8_t i;
-
-  u8x8.clear();
-  for ( i = 0; i < menuRows; i++ ) {
-    if ((i + 1) == (highlightRow)) {
-      u8x8.setInverseFont(1);
-    }
-    u8x8.drawString(0, i * 2, myMenus[selectMenu][i]);
-    u8x8.setInverseFont(0);
-  }
-}
 /*
   void loopMenu()
   {
@@ -395,28 +408,75 @@ void printPosition(void)
 //*************************************************************************************
 void rotaryEncoderStep(boolean bCW, boolean &ledState)
 {
-  if (bCW == true) {
-    encoderPosCount ++;
-    if (ledState) {
-      rotate(-5, .1);
-    } else {
-      rotate(-1, .1);
-    }
-  } else {
-    // Otherwise B changed first and we're moving CCW
-    encoderPosCount --;
-    if (ledState) {
-      rotate(5, .1);
-    } else {
-      rotate(1, .1);
-    }
+  switch (menuMode) {
+    case 0: // In stepper mode we only switch between X1 & X5 steps
+      if (bCW == true) {
+        encoderPosCount ++;
+        if (ledState) {
+          rotate(-5, .1);
+        } else {
+          rotate(-1, .1);
+        }
+      } else {
+        // Otherwise B changed first and we're moving CCW
+        encoderPosCount --;
+        if (ledState) {
+          rotate(5, .1);
+        } else {
+          rotate(1, .1);
+        }
+      }
+      Serial.print(F("1 Encoder position count = "));
+      Serial.print(encoderPosCount);
+      Serial.print(F(" and Current position = "));
+      Serial.println(currentPosn);
+      printPosition();
+      break;
+    case 1:
+      Serial.println(F("Case 1 encoderStep"));
+      if (bCW == true) {
+        if ( menuRow == 1 ) {
+          menuRow = 4;
+        } else {
+          menuRow--;
+        }
+        Serial.print(F("Stepping clockwise, menuRow = ")); Serial.println(menuRow);
+      } else {
+        if ( menuRow == 4 ) {
+          menuRow = 1;
+        } else {
+          menuRow++;
+        }
+        Serial.print(F("Stepping antiClock, menuRow = ")); Serial.println(menuRow);
+      }
+      drawMenu(1, menuRow);
+      break;
+    case 2:
+      Serial.println(F("Case 1 encoderStep"));
+      if (bCW == true) {
+        Serial.println(F("Stepping up"));
+      } else {
+        Serial.println(F("Stepping down"));
+      }
+      break;
+    case 3:
+      Serial.println(F("Case 1 encoderStep"));
+      if (bCW == true) {
+        Serial.println(F("Stepping up"));
+      } else {
+        Serial.println(F("Stepping down"));
+      }
+      break;
+    case 4:
+      Serial.println(F("Case 1 encoderStep"));
+      if (bCW == true) {
+        Serial.println(F("Stepping up"));
+      } else {
+        Serial.println(F("Stepping down"));
+      }
+      break;
   }
-  Serial.print(F("1 Encoder position count = "));
-  Serial.print(encoderPosCount);
-  Serial.print(F(" and Current position = "));
-  Serial.println(currentPosn);
 
-  printPosition();
 }
 
 //*************************************************************************************
@@ -671,7 +731,7 @@ void setPosition()
     rotate(-1, .1); // Step anticlockwise to original position
     counter--; // currentPosn is adjusted in the rotate routine
   }
-  
+
   mode = 0; // Set to normal stepper operation
   //  if(currentPosn > 2700) currentPosn = 2500;
   Serial.print(F("\ncurrentPosn = "));
