@@ -84,8 +84,12 @@ const char *myMenus[4][4] = {
   { "Band = 30M", "Band = 20M", "Band = 17M", "Band = 15M"},
   { "Tune to bottom", "of the band", "OK", "CANCEL"}
 };
-uint8_t menuMode = 0; // 0 = stepper mode & menus 1, 2, 3, 4
+uint8_t menuPage = 0; // 0 = stepper mode & menus 1, 2, 3, 4
 uint8_t menuRow = 1; // current menu line can be 1, 2, 3, 4
+uint16_t bandPosn30 = 800;
+uint16_t bandPosn20 = 1880;
+uint16_t bandPosn17 = 2000;
+uint16_t bandPosn15 = 2200;
 
 uint16_t encoderPosCount = 80;
 char encoderPosString[5]; // The count needs to be a string for the display
@@ -265,34 +269,31 @@ void loop()
   }
   if ((KI.btn2_State == 0xFFFF) && (KI.btn2_State != KI.KY_040_pBtn_Hist)) { // Button was released
     KI.KY_040_pBtn_Hist = 0xFFFF;
-    Serial.print(F("buttonTime + = ")); Serial.print(buttonTime + 1000000);
-    Serial.print(F(" & micros() = ")); Serial.println(micros());
+//    Serial.print(F("buttonTime + = ")); Serial.print(buttonTime + 1000000);
+//    Serial.print(F(" & micros() = ")); Serial.println(micros());
     // Get whether it was a short or long press
     if ((buttonTime + 1000000) < micros()) { // check for a long press
-      Serial.println(F("it was a long press"));
-      switch (menuMode) {
-        case 0:
-          Serial.println(F("Case 0 Long"));
-          menuMode = 1;
-          drawMenu(1, 1);
-          menuRow = 1;
-          break;
-        default:
-          Serial.println(F("Exiting a sub menu - Long"));
-          menuMode = 0;
-          drawMenu(0, 0);
-          u8x8.drawString(0, 2, "Step Posn = ");
-          u8x8.drawString(12, 2, encoderPosString);
-          break;
+      Serial.print(F("Long press: Entry, menuPage = ")); Serial.println(menuPage);
+      if (menuPage == 0) {
+        menuPage = 1;
+        drawMenu(1, 1);
+        menuRow = 1;
+      } else { // Exit any sub menu and go back to stepper menu
+//        Serial.println(F("Exiting a sub menu - Long"));
+        menuPage = 0;
+        drawMenu(0, 0);
+        u8x8.drawString(0, 2, "Step Posn = ");
+        printPosition();
       }
+      Serial.print(F("Long press: Exit, menuPage = ")); Serial.println(menuPage);
     }
 
     else {
       // We are processing a step speed change or selecting a sub menu item.
-      Serial.println(F("It was a short press"));
-      switch (menuMode) {
+      //      Serial.println(F("It was a short press"));
+      switch (menuPage) {
         case 0: // Toggle the step rate
-          Serial.println(F("Case 0 short"));
+          Serial.println(F("Case 0 short press"));
           if (ledState) {
             digitalWrite(LED_BUILTIN, LOW); // Turn off LED
             ledState = false;
@@ -304,21 +305,99 @@ void loop()
           }
           u8x8.setInverseFont(0);
           break;
-        case 1: // Choose from menu 1
-          Serial.println(F("Case 1 short"));
+        case 1: // Choose from menuPage 1
+          Serial.print(F("menuPage 1 short press; menuRow = ")); Serial.println(menuRow);
+          switch (menuRow) {
+            case 1: // Switch to menuPage 2
+              menuPage = 2;
+              drawMenu(2, 1);
+              break;
+            case 2: // Switch to menuPage 3
+              menuPage = 3;
+              drawMenu(3, 1);
+              break;
+            case 3: // Choose from menu 4
+              menuPage = 4;
+              drawMenu(4, 0);
+              Serial.println(F("Case 3 short press"));
+              break;
+            case 4: // Exit back to
+              menuPage = 4;
+              drawMenu(4, 0);
+              Serial.println(F("Case 4 short press"));
+              break;
+          }
           break;
-        case 2: // Choose from menu 2
-          Serial.println(F("Case 2 short"));
+        case 2: // Choose from menuPage 2 the required band
+          Serial.print(F("menuPage = 2; menuRow = ")); Serial.println(menuRow);
+          bandChange();
+          /*
+            switch (menuRow) {
+            case 1: // 30 Metre band
+              Serial.println(F("30M band chosen"));
+              bandChange(bandPosn30);
+              break;
+            case 2: // Switch to menuPage 3
+              Serial.println(F("20M band chosen"));
+              bandChange(bandPosn20);
+              break;
+            case 3: // Choose from menu 2
+              Serial.println(F("17M band chosen"));
+              bandChange(bandPosn17);
+              break;
+            case 4: // Choose from menu 2
+              Serial.println(F("15M band chosen"));
+              bandChange(bandPosn15);
+              break;
+            }
+          */
           break;
       }
+      buttonTime = 0;
     }
-    buttonTime = 0;
   }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Subroutines start here
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void bandChange(void)
+{
+  Serial.print(F("bandChange(): currentPosn; menuRow = ")); Serial.print(currentPosn); Serial.print("; ");
+  Serial.println(menuRow);
 
+  switch (menuRow) {
+    case 1: // 30 Metre band
+      Serial.println(F("30M band chosen"));
+      rotate((currentPosn - bandPosn30), 0.1);
+      //      bandChange(bandPosn30);
+      break;
+    case 2: // Switch to menuPage 3
+      Serial.println(F("20M band chosen"));
+      rotate((currentPosn - bandPosn20), 0.1);
+      //      bandChange(bandPosn20);
+      break;
+    case 3: // Choose from menu 2
+      Serial.println(F("17M band chosen"));
+      rotate((currentPosn - bandPosn17), 0.1);
+      //      bandChange(bandPosn17);
+      break;
+    case 4: // Choose from menu 2
+      Serial.println(F("15M band chosen"));
+      rotate((currentPosn - bandPosn15), 0.1);
+      //      bandChange(bandPosn15);
+      break;
+  }
+
+//  rotate((currentPosn - band), 0.1);
+  // Now return to stepping menu
+  menuPage = 0;
+  menuRow = 1;
+  drawMenu(0, 0);
+  u8x8.drawString(0, 2, "Step Posn = ");
+  printPosition();
+}
+
+//*************************************************************************************
 void drawMenu(uint8_t selectMenu, uint8_t highlightRow) {
 
   uint8_t i;
@@ -408,7 +487,7 @@ void printPosition(void)
 //*************************************************************************************
 void rotaryEncoderStep(boolean bCW, boolean &ledState)
 {
-  switch (menuMode) {
+  switch (menuPage) {
     case 0: // In stepper mode we only switch between X1 & X5 steps
       if (bCW == true) {
         encoderPosCount ++;
@@ -433,6 +512,9 @@ void rotaryEncoderStep(boolean bCW, boolean &ledState)
       printPosition();
       break;
     case 1:
+    case 2:
+    case 3:
+    case 4:
       Serial.println(F("Case 1 encoderStep"));
       if (bCW == true) {
         if ( menuRow == 1 ) {
@@ -449,32 +531,35 @@ void rotaryEncoderStep(boolean bCW, boolean &ledState)
         }
         Serial.print(F("Stepping antiClock, menuRow = ")); Serial.println(menuRow);
       }
-      drawMenu(1, menuRow);
+      drawMenu(menuPage, menuRow);
       break;
-    case 2:
-      Serial.println(F("Case 1 encoderStep"));
-      if (bCW == true) {
-        Serial.println(F("Stepping up"));
-      } else {
-        Serial.println(F("Stepping down"));
-      }
-      break;
-    case 3:
-      Serial.println(F("Case 1 encoderStep"));
-      if (bCW == true) {
-        Serial.println(F("Stepping up"));
-      } else {
-        Serial.println(F("Stepping down"));
-      }
-      break;
-    case 4:
-      Serial.println(F("Case 1 encoderStep"));
-      if (bCW == true) {
-        Serial.println(F("Stepping up"));
-      } else {
-        Serial.println(F("Stepping down"));
-      }
-      break;
+
+      /*
+        case 2:
+        Serial.println(F("Case 1 encoderStep"));
+        if (bCW == true) {
+         Serial.println(F("Stepping up"));
+        } else {
+         Serial.println(F("Stepping down"));
+        }
+        break;
+        case 3:
+        Serial.println(F("Case 1 encoderStep"));
+        if (bCW == true) {
+         Serial.println(F("Stepping up"));
+        } else {
+         Serial.println(F("Stepping down"));
+        }
+        break;
+        case 4:
+        Serial.println(F("Case 1 encoderStep"));
+        if (bCW == true) {
+         Serial.println(F("Stepping up"));
+        } else {
+         Serial.println(F("Stepping down"));
+        }
+        break;
+      */
   }
 
 }
@@ -736,7 +821,6 @@ void setPosition()
   //  if(currentPosn > 2700) currentPosn = 2500;
   Serial.print(F("\ncurrentPosn = "));
   Serial.print(currentPosn);
-  //  itoa(currentPosn, encoderPosString, 10);
   Serial.print(F(":  counter = "));
   Serial.println(counter);
 
@@ -770,6 +854,9 @@ void rotate(int steps, float speed) {
     }
   }
   digitalWrite(DIR_PIN, rotationDirection); // Set the rotation direction on the Easy Stepper
+
+  Serial.print(F("rotate: rotationDirection; steps = ")); Serial.print(rotationDirection); Serial.print("; ");
+  Serial.println(steps);
 
   for (int i = 0; i < steps; i++) {
     // If not in calibration mode, detect the position light interrupter status
